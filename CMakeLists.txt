@@ -437,6 +437,7 @@ set(SOURCES
         util/xxhash.cc
         utilities/backupable/backupable_db.cc
         utilities/blob_db/blob_db.cc
+        utilities/blob_db/blob_db_impl.cc
         utilities/checkpoint/checkpoint.cc
         utilities/col_buf_decoder.cc
         utilities/col_buf_encoder.cc
