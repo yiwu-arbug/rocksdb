@@ -27,6 +27,7 @@ namespace rocksdb {
 
 static const std::string kRocksDbTFileExt = "sst";
 static const std::string kLevelDbTFileExt = "ldb";
+static const std::string kRocksDBBlobFileExt = "blob";
 
 // Given a path, flatten the path name by replacing all chars not in
 // {[0-9,a-z,A-Z,-,_,.]} with _. And append '_LOG\0' at the end.
@@ -76,7 +77,7 @@ std::string LogFileName(const std::string& name, uint64_t number) {
 
 std::string BlobFileName(const std::string& blobdirname, uint64_t number) {
   assert(number > 0);
-  return MakeFileName(blobdirname, number, "blob");
+  return MakeFileName(blobdirname, number, kRocksDBBlobFileExt.c_str());
 }
 
 std::string ArchivalDirectory(const std::string& dir) {
@@ -340,7 +341,7 @@ bool ParseFileName(const std::string& fname, uint64_t* number,
     } else if (suffix == Slice(kRocksDbTFileExt) ||
                suffix == Slice(kLevelDbTFileExt)) {
       *type = kTableFile;
-    } else if (suffix == Slice("blob")) {
+    } else if (suffix == Slice(kRocksDBBlobFileExt)) {
       *type = kBlobFile;
     } else if (suffix == Slice(kTempFileNameSuffix)) {
       *type = kTempFile;

@@ -20,6 +20,8 @@
 
 namespace rocksdb {
 
+class CompactionEventListener;
+
 class CompactionIterator {
  public:
   // A wrapper around Compaction. Has a much smaller interface, only what
@@ -52,26 +54,26 @@ class CompactionIterator {
     const Compaction* compaction_;
   };
 
-  CompactionIterator(InternalIterator* input, const Comparator* cmp,
-                     MergeHelper* merge_helper, SequenceNumber last_sequence,
-                     std::vector<SequenceNumber>* snapshots,
-                     SequenceNumber earliest_write_conflict_snapshot, Env* env,
-                     bool expect_valid_internal_key,
-                     RangeDelAggregator* range_del_agg,
-                     const Compaction* compaction = nullptr,
-                     const CompactionFilter* compaction_filter = nullptr,
-                     const std::atomic<bool>* shutting_down = nullptr);
+  CompactionIterator(
+      InternalIterator* input, const Comparator* cmp, MergeHelper* merge_helper,
+      SequenceNumber last_sequence, std::vector<SequenceNumber>* snapshots,
+      SequenceNumber earliest_write_conflict_snapshot, Env* env,
+      bool expect_valid_internal_key, RangeDelAggregator* range_del_agg,
+      const Compaction* compaction = nullptr,
+      const CompactionFilter* compaction_filter = nullptr,
+      const CompactionEventListener* compaction_listener = nullptr,
+      const std::atomic<bool>* shutting_down = nullptr);
 
   // Constructor with custom CompactionProxy, used for tests.
-  CompactionIterator(InternalIterator* input, const Comparator* cmp,
-                     MergeHelper* merge_helper, SequenceNumber last_sequence,
-                     std::vector<SequenceNumber>* snapshots,
-                     SequenceNumber earliest_write_conflict_snapshot, Env* env,
-                     bool expect_valid_internal_key,
-                     RangeDelAggregator* range_del_agg,
-                     std::unique_ptr<CompactionProxy> compaction,
-                     const CompactionFilter* compaction_filter = nullptr,
-                     const std::atomic<bool>* shutting_down = nullptr);
+  CompactionIterator(
+      InternalIterator* input, const Comparator* cmp, MergeHelper* merge_helper,
+      SequenceNumber last_sequence, std::vector<SequenceNumber>* snapshots,
+      SequenceNumber earliest_write_conflict_snapshot, Env* env,
+      bool expect_valid_internal_key, RangeDelAggregator* range_del_agg,
+      std::unique_ptr<CompactionProxy> compaction,
+      const CompactionFilter* compaction_filter = nullptr,
+      const CompactionEventListener* compaction_listener = nullptr,
+      const std::atomic<bool>* shutting_down = nullptr);
 
   ~CompactionIterator();
 
@@ -124,6 +126,7 @@ class CompactionIterator {
   RangeDelAggregator* range_del_agg_;
   std::unique_ptr<CompactionProxy> compaction_;
   const CompactionFilter* compaction_filter_;
+  const CompactionEventListener* compaction_listener_;
   const std::atomic<bool>* shutting_down_;
   bool bottommost_level_;
   bool valid_ = false;
@@ -131,7 +134,6 @@ class CompactionIterator {
   SequenceNumber earliest_snapshot_;
   SequenceNumber latest_snapshot_;
   bool ignore_snapshots_;
-  bool all_versions_;
 
   // State
   //

@@ -10,20 +10,21 @@
 
 namespace rocksdb {
 
-CompactionFilter::ValueType fromInternalValueType(ValueType vt) {
+EventListener::CompactionListenerValueType fromInternalValueType(ValueType vt) {
   switch (vt) {
     case kTypeDeletion:
-      return CompactionFilter::ValueType::kDelete;
+      return EventListener::CompactionListenerValueType::kDelete;
     case kTypeValue:
-      return CompactionFilter::ValueType::kValue;
+      return EventListener::CompactionListenerValueType::kValue;
     case kTypeMerge:
-      return CompactionFilter::ValueType::kMergeOperand;
+      return EventListener::CompactionListenerValueType::kMergeOperand;
     case kTypeSingleDeletion:
-      return CompactionFilter::ValueType::kSingleDelete;
+      return EventListener::CompactionListenerValueType::kSingleDelete;
     case kTypeRangeDeletion:
-      return CompactionFilter::ValueType::kRangeDelete;
-    default :
+      return EventListener::CompactionListenerValueType::kRangeDelete;
+    default:
       assert(false);
+      return EventListener::CompactionListenerValueType::kInvalid;
   }
 }
 
@@ -33,6 +34,7 @@ CompactionIterator::CompactionIterator(
     SequenceNumber earliest_write_conflict_snapshot, Env* env,
     bool expect_valid_internal_key, RangeDelAggregator* range_del_agg,
     const Compaction* compaction, const CompactionFilter* compaction_filter,
+    const CompactionEventListener* compaction_listener,
     const std::atomic<bool>* shutting_down)
     : CompactionIterator(
           input, cmp, merge_helper, last_sequence, snapshots,
@@ -40,7 +42,7 @@ CompactionIterator::CompactionIterator(
           range_del_agg,
           std::unique_ptr<CompactionProxy>(
               compaction ? new CompactionProxy(compaction) : nullptr),
-          compaction_filter, shutting_down) {}
+          compaction_filter, compaction_listener, shutting_down) {}
 
 CompactionIterator::CompactionIterator(
     InternalIterator* input, const Comparator* cmp, MergeHelper* merge_helper,
@@ -49,6 +51,7 @@ CompactionIterator::CompactionIterator(
     bool expect_valid_internal_key, RangeDelAggregator* range_del_agg,
     std::unique_ptr<CompactionProxy> compaction,
     const CompactionFilter* compaction_filter,
+    const CompactionEventListener* compaction_listener,
     const std::atomic<bool>* shutting_down)
     : input_(input),
       cmp_(cmp),
@@ -60,8 +63,9 @@ CompactionIterator::CompactionIterator(
       range_del_agg_(range_del_agg),
       compaction_(std::move(compaction)),
       compaction_filter_(compaction_filter),
+      compaction_listener_(compaction_listener),
       shutting_down_(shutting_down),
-      all_versions_(false),
+      ignore_snapshots_(false),
       merge_out_iter_(merge_helper_) {
   assert(compaction_filter_ == nullptr || compaction_ != nullptr);
   bottommost_level_ =
@@ -81,10 +85,7 @@ CompactionIterator::CompactionIterator(
     latest_snapshot_ = snapshots_->back();
   }
   if (compaction_filter_ != nullptr) {
-     if (compaction_filter_->IgnoreSnapshots())
-       ignore_snapshots_ = true;
-     if (compaction_filter_->AllVersions())
-       all_versions_ = true;
+    if (compaction_filter_->IgnoreSnapshots()) ignore_snapshots_ = true;
   } else {
     ignore_snapshots_ = false;
   }
@@ -209,9 +210,10 @@ void CompactionIterator::NextFromInput() {
       current_user_key_sequence_ = kMaxSequenceNumber;
       current_user_key_snapshot_ = 0;
 
-      if (all_versions_)
-        compaction_filter_->Callback(compaction_->level(), ikey_.user_key,
-            fromInternalValueType(ikey_.type), value_, ikey_.sequence, true);
+      if (compaction_listener_)
+        compaction_listener_->OnCompaction(compaction_->level(), ikey_.user_key,
+                                           fromInternalValueType(ikey_.type),
+                                           value_, ikey_.sequence, true);
 
       // apply the compaction filter to the first occurrence of the user key
       if (compaction_filter_ != nullptr && ikey_.type == kTypeValue &&
@@ -260,9 +262,11 @@ void CompactionIterator::NextFromInput() {
         }
       }
     } else {
-      if (all_versions_)
-        compaction_filter_->Callback(compaction_->level(), ikey_.user_key,
-            fromInternalValueType(ikey_.type), value_, ikey_.sequence, false);
+      if (compaction_listener_)
+        compaction_listener_->OnCompaction(compaction_->level(), ikey_.user_key,
+                                           fromInternalValueType(ikey_.type),
+                                           value_, ikey_.sequence, false);
+
       // Update the current key to reflect the new sequence number/type without
       // copying the user key.
       // TODO(rven): Compaction filter does not process keys in this path

@@ -324,7 +324,31 @@ class EventListener {
   virtual void OnExternalFileIngested(
       DB* /*db*/, const ExternalFileIngestionInfo& /*info*/) {}
 
+  enum CompactionListenerValueType {
+    kValue,
+    kMergeOperand,
+    kDelete,
+    kSingleDelete,
+    kRangeDelete,
+    kInvalid,
+  };
+
+  // A call-back function for RocksDB which will be called when the compaction
+  // iterator is compacting values
+  virtual void OnCompaction(int level, const Slice& key,
+                            CompactionListenerValueType value_type,
+                            const Slice& existing_value,
+                            const SequenceNumber& sn, bool is_new) const {}
+
   virtual ~EventListener() {}
+};
+
+class CompactionEventListener : public EventListener {
+ public:
+  virtual void OnCompaction(int level, const Slice& key,
+                            CompactionListenerValueType value_type,
+                            const Slice& existing_value,
+                            const SequenceNumber& sn, bool is_new) const = 0;
 };
 
 #else
