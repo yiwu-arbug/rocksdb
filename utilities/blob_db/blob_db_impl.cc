@@ -436,6 +436,7 @@ Status BlobDBImpl::OpenAllFiles() {
 
   for (auto f_iter : file_nums) {
     std::string bfpath = BlobFileName(blob_dir_, f_iter.first);
+    printf("blob file: %s\n", bfpath.c_str());
     uint64_t size_bytes;
     Status s1 = myenv_->GetFileSize(bfpath, &size_bytes);
     if (!s1.ok()) {

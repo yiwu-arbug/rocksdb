@@ -34,7 +34,8 @@ void gen_random(char *s, const int len) {
 class BlobDBTest : public testing::Test {
  public:
   BlobDBTest() : blobdb_(nullptr) {
-    dbname_ = test::TmpDir() + "/blob_db_test";
+    dbname_ = "/home/yiwu/tmp/adsdb_100";
+    // dbname_ = test::TmpDir() + "/blob_db_test";
     // Reopen1(BlobDBOptionsImpl());
   }
 
@@ -101,6 +102,12 @@ class BlobDBTest : public testing::Test {
   BlobDB *blobdb_;
   std::string dbname_;
 };  // class BlobDBTest
+
+TEST_F(BlobDBTest, TryOpen) {
+  BlobDBOptions bdb_opt;
+  Options opt, changed_opt;
+  ASSERT_OK(BlobDB::OpenAndLoad(opt, bdb_opt, dbname_, &blobdb_, &changed_opt));
+}
 
 TEST_F(BlobDBTest, DeleteComplex) {
   BlobDBOptionsImpl bdboptions;
