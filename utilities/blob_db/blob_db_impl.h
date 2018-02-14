@@ -194,7 +194,7 @@ class BlobDBImpl : public BlobDB {
   Status TEST_GCFileAndUpdateLSM(std::shared_ptr<BlobFile>& bfile,
                                  GCStats* gc_stats);
 
-  void TEST_RunGC();
+  bool TEST_RunGC();
 
   void TEST_DeleteObsoleteFiles();
 #endif  //  !NDEBUG
@@ -255,7 +255,9 @@ class BlobDBImpl : public BlobDB {
   std::pair<bool, int64_t> DeleteObsoleteFiles(bool aborted);
 
   // Major task to garbage collect expired and deleted blobs
-  std::pair<bool, int64_t> RunGC(bool aborted);
+  std::pair<bool, int64_t> RunGCWrapper(bool aborted);
+
+  bool RunGC();
 
   // periodically check if open blob files and their TTL's has expired
   // if expired, close the sequential writer and make the file immutable

@@ -1262,6 +1262,41 @@ TEST_F(BlobDBTest, FilterExpiredBlobIndex) {
   VerifyDB(data_after_compact);
 }
 
+TEST_F(BlobDBTest, RunGC) {
+  BlobDBOptions bdb_options;
+  bdb_options.garbage_collection_deletion_size_threshold = 0.1;
+  bdb_options.disable_background_tasks = true;
+  Open(bdb_options);
+
+  std::map<std::string, std::string> data;
+  for (int i = 0; i < 10; i++) {
+    Put("key" + ToString(i), std::string(100, 'v'));
+    data["key" + ToString(i)] = std::string(100, 'v');
+  }
+  ASSERT_EQ(1, blob_db_impl()->TEST_GetBlobFiles().size());
+  ASSERT_EQ(0, blob_db_impl()->TEST_GetObsoleteFiles().size());
+  auto blob_files = blob_db_impl()->TEST_GetBlobFiles();
+  auto blob_file = blob_files[0];
+  ASSERT_TRUE(blob_db_impl()->TEST_RunGC());
+  ASSERT_EQ(1, blob_db_impl()->TEST_GetBlobFiles().size());
+  ASSERT_EQ(0, blob_db_impl()->TEST_GetObsoleteFiles().size());
+  ASSERT_OK(blob_db_impl()->TEST_CloseBlobFile(blob_file));
+  ASSERT_TRUE(blob_db_impl()->TEST_RunGC());
+  ASSERT_EQ(1, blob_db_impl()->TEST_GetBlobFiles().size());
+  ASSERT_EQ(0, blob_db_impl()->TEST_GetObsoleteFiles().size());
+  Delete("key0");
+  ASSERT_TRUE(blob_db_impl()->TEST_RunGC());
+  ASSERT_EQ(1, blob_db_impl()->TEST_GetBlobFiles().size());
+  ASSERT_EQ(0, blob_db_impl()->TEST_GetObsoleteFiles().size());
+  Delete("key1");
+  ASSERT_TRUE(blob_db_impl()->TEST_RunGC());
+  ASSERT_EQ(2, blob_db_impl()->TEST_GetBlobFiles().size());
+  ASSERT_EQ(1, blob_db_impl()->TEST_GetObsoleteFiles().size());
+  data.erase("key0");
+  data.erase("key1");
+  VerifyDB(data);
+}
+
 }  //  namespace blob_db
 }  //  namespace rocksdb
 

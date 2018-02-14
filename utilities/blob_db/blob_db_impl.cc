@@ -175,9 +175,10 @@ void BlobDBImpl::StartBackgroundTasks() {
   tqueue_.add(
       kReclaimOpenFilesPeriodMillisecs,
       std::bind(&BlobDBImpl::ReclaimOpenFiles, this, std::placeholders::_1));
-  tqueue_.add(static_cast<int64_t>(
-                  bdb_options_.garbage_collection_interval_secs * 1000),
-              std::bind(&BlobDBImpl::RunGC, this, std::placeholders::_1));
+  tqueue_.add(
+      static_cast<int64_t>(bdb_options_.garbage_collection_interval_secs *
+                           1000),
+      std::bind(&BlobDBImpl::RunGCWrapper, this, std::placeholders::_1));
   tqueue_.add(
       kDeleteObsoleteFilesPeriodMillisecs,
       std::bind(&BlobDBImpl::DeleteObsoleteFiles, this, std::placeholders::_1));
@@ -1641,15 +1642,123 @@ void BlobDBImpl::CopyBlobFiles(
   }
 }
 
-std::pair<bool, int64_t> BlobDBImpl::RunGC(bool aborted) {
+std::pair<bool, int64_t> BlobDBImpl::RunGCWrapper(bool aborted) {
   if (aborted) {
     return std::make_pair(false, -1);
   }
-
-  // TODO(yiwu): Garbage collection implementation.
-
+  RunGC();
   // reschedule
   return std::make_pair(true, -1);
+}
+
+bool BlobDBImpl::RunGC() {
+  std::unordered_map<uint64_t, uint64_t> file_sizes;
+  std::unordered_map<uint64_t, uint64_t> file_valid_sizes;
+  {
+    ReadLock l(&mutex_);
+    for (auto& blob_file_entry : blob_files_) {
+      auto& blob_file = blob_file_entry.second;
+      if (blob_file->Immutable() && !blob_file->Obsolete()) {
+        uint64_t file_number = blob_file->BlobFileNumber();
+        file_sizes[file_number] = blob_file->GetFileSize();
+        file_valid_sizes[file_number] =
+            BlobLogHeader::kSize + BlobLogFooter::kSize;
+      }
+    }
+  }
+
+  if (file_sizes.size() == 0) {
+    ROCKS_LOG_INFO(db_options_.info_log,
+                   "Garbage collection finished: no candidate files.");
+    return true;
+  }
+
+  auto* cfd =
+      reinterpret_cast<ColumnFamilyHandleImpl*>(DefaultColumnFamily())->cfd();
+  SequenceNumber latest_seq = GetLatestSequenceNumber();
+  std::unique_ptr<ArenaWrappedDBIter> iter(db_impl_->NewIteratorImpl(
+      ReadOptions(), cfd, latest_seq, nullptr /*read_callback*/,
+      true /*allow_blob*/));
+  if (iter == nullptr) {
+    ROCKS_LOG_ERROR(db_options_.info_log,
+                    "Garbage collection failed: null iterator.");
+    return false;
+  }
+
+  iter->SeekToFirst();
+  while (iter->Valid()) {
+    if (!iter->status().ok()) {
+      ROCKS_LOG_ERROR(db_options_.info_log,
+                      "Garbage collection failed: iterator status %s",
+                      iter->status().ToString().c_str());
+      return false;
+    }
+
+    if (iter->IsBlob()) {
+      BlobIndex blob_index;
+      Status decode_status = blob_index.DecodeFrom(iter->value());
+      if (!decode_status.ok()) {
+        ROCKS_LOG_ERROR(
+            db_options_.info_log,
+            "Garbage collection failed: decode blob index failed: %s",
+            decode_status.ToString().c_str());
+        return false;
+      }
+      if (!blob_index.IsInlined()) {
+        uint64_t current_file_number = blob_index.file_number();
+        if (file_valid_sizes.count(current_file_number) > 0) {
+          file_valid_sizes[current_file_number] += BlobLogRecord::kHeaderSize +
+                                                   iter->key().size() +
+                                                   blob_index.size();
+        }
+      }
+    }
+
+    iter->Next();
+  }
+
+  for (auto& fs : file_sizes) {
+    assert(file_valid_sizes.count(fs.first) > 0);
+    ROCKS_LOG_INFO(
+        db_options_.info_log,
+        "Garbage collection stats for file %lu: file size: %lu, valid size %lu",
+        fs.first, fs.second, file_valid_sizes[fs.first]);
+  }
+
+  for (auto& fs : file_sizes) {
+    assert(file_valid_sizes.count(fs.first) > 0);
+    if ((double)fs.second *
+            (1.0 - bdb_options_.garbage_collection_deletion_size_threshold) >
+        (double)file_valid_sizes[fs.first]) {
+      ROCKS_LOG_INFO(db_options_.info_log,
+                     "Garbage collection started for file %lu", fs.first);
+      std::shared_ptr<BlobFile> blob_file;
+      {
+        ReadLock l(&mutex_);
+        for (auto bf : blob_files_) {
+          if (bf.second->BlobFileNumber() == fs.first) {
+            blob_file = bf.second;
+            break;
+          }
+        }
+      }
+      if (blob_file == nullptr) {
+        ROCKS_LOG_ERROR(db_options_.info_log,
+                        "Garbage collection failed: file %lu gone.", fs.first);
+        return false;
+      }
+      GCStats gc_stats;
+      Status gc_status = GCFileAndUpdateLSM(blob_file, &gc_stats);
+      if (!gc_status.ok()) {
+        ROCKS_LOG_ERROR(db_options_.info_log,
+                        "Garbage collection failed: gc_status %s",
+                        gc_status.ToString().c_str());
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 Iterator* BlobDBImpl::NewIterator(const ReadOptions& read_options) {
@@ -1740,7 +1849,7 @@ Status BlobDBImpl::TEST_GCFileAndUpdateLSM(std::shared_ptr<BlobFile>& bfile,
   return GCFileAndUpdateLSM(bfile, gc_stats);
 }
 
-void BlobDBImpl::TEST_RunGC() { RunGC(false /*abort*/); }
+bool BlobDBImpl::TEST_RunGC() { return RunGC(); }
 #endif  //  !NDEBUG
 
 }  // namespace blob_db

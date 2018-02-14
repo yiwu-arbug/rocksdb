@@ -79,7 +79,7 @@ struct BlobDBOptions {
   bool enable_garbage_collection = false;
 
   // Time interval to trigger garbage collection, in seconds.
-  uint64_t garbage_collection_interval_secs = 60;
+  uint64_t garbage_collection_interval_secs = 60 * 60;
 
   // If garbage collection is enabled, blob files with deleted size no less
   // than this ratio will become candidates to be cleanup.
