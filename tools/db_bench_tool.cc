@@ -3628,10 +3628,10 @@ void VerifyDBFromDB(std::string& truth_db_name) {
         if (use_blob_db_) {
 #ifndef ROCKSDB_LITE
           Slice val = gen.Generate(value_size_);
-          int ttl = rand() % FLAGS_blob_db_max_ttl_range;
+          // int ttl = rand() % FLAGS_blob_db_max_ttl_range;
           blob_db::BlobDB* blobdb =
               static_cast<blob_db::BlobDB*>(db_with_cfh->db);
-          s = blobdb->PutWithTTL(write_options_, key, val, ttl);
+          s = blobdb->Put(write_options_, key, val);
 #endif  //  ROCKSDB_LITE
         } else if (FLAGS_num_column_families <= 1) {
           batch.Put(key, gen.Generate(value_size_));
