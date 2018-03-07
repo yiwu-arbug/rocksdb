@@ -23,10 +23,11 @@ class BlockFetcher {
   BlockFetcher(RandomAccessFileReader* file,
                FilePrefetchBuffer* prefetch_buffer, const Footer& footer,
                const ReadOptions& read_options, const BlockHandle& handle,
-               BlockContents* contents,
-               const ImmutableCFOptions& ioptions,
+               BlockContents* contents, const ImmutableCFOptions& ioptions,
                bool do_uncompress, const Slice& compression_dict,
-               const PersistentCacheOptions& cache_options)
+               const PersistentCacheOptions& cache_options,
+               Cache* block_cache = nullptr, const Slice* block_cache_key = nullptr,
+               void** alloc_handle = nullptr)
       : file_(file),
         prefetch_buffer_(prefetch_buffer),
         footer_(footer),
@@ -36,7 +37,10 @@ class BlockFetcher {
         ioptions_(ioptions),
         do_uncompress_(do_uncompress),
         compression_dict_(compression_dict),
-        cache_options_(cache_options) {}
+        cache_options_(cache_options),
+        block_cache_(block_cache),
+        block_cache_key_(block_cache_key),
+        alloc_handle_(alloc_handle) {}
   Status ReadBlockContents();
 
  private:
@@ -52,11 +56,15 @@ class BlockFetcher {
   bool do_uncompress_;
   const Slice& compression_dict_;
   const PersistentCacheOptions& cache_options_;
+  Cache* block_cache_;
+  const Slice* block_cache_key_;
+  void** alloc_handle_;
   Status status_;
   Slice slice_;
   char* used_buf_ = nullptr;
   size_t block_size_;
   std::unique_ptr<char[]> heap_buf_;
+  char* alloc_buf_from_cache_ = nullptr;
   char stack_buf_[kDefaultStackBufferSize];
   bool got_from_prefetch_buffer_ = false;
   rocksdb::CompressionType compression_type;
@@ -71,5 +79,6 @@ class BlockFetcher {
   void InsertCompressedBlockToPersistentCacheIfNeeded();
   void InsertUncompressedBlockToPersistentCacheIfNeeded();
   void CheckBlockChecksum();
+  char* AllocateBuf();
 };
 }  // namespace rocksdb
