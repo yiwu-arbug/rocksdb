@@ -830,8 +830,8 @@ bool InternalStats::HandleEstimateOldestKeyTime(uint64_t* value, DBImpl* /*db*/,
   return *value > 0 && *value < std::numeric_limits<uint64_t>::max();
 }
 
-bool InternalStats::HandleBlockCacheCapacity(uint64_t* value, DBImpl* /*db*/,
-                                             Version* /*version*/) {
+bool InternalStats::HandleBlockCacheStat(Cache** block_cache) {
+  assert(block_cache != nullptr);
   auto* table_factory = cfd_->ioptions()->table_factory;
   assert(table_factory != nullptr);
   if (BlockBasedTableFactory::kName != table_factory->Name()) {
@@ -839,8 +839,18 @@ bool InternalStats::HandleBlockCacheCapacity(uint64_t* value, DBImpl* /*db*/,
   }
   auto* table_options =
       reinterpret_cast<BlockBasedTableOptions*>(table_factory->GetOptions());
-  auto block_cache = table_options->block_cache;
-  if (table_options->no_block_cache || block_cache == nullptr) {
+  *block_cache = table_options->block_cache.get();
+  if (table_options->no_block_cache || *block_cache == nullptr) {
+    return false;
+  }
+  return true;
+}
+
+bool InternalStats::HandleBlockCacheCapacity(uint64_t* value, DBImpl* /*db*/,
+                                             Version* /*version*/) {
+  Cache* block_cache;
+  bool ok = HandleBlockCacheStat(&block_cache);
+  if (!ok) {
     return false;
   }
   *value = static_cast<uint64_t>(block_cache->GetCapacity());
@@ -849,15 +859,9 @@ bool InternalStats::HandleBlockCacheCapacity(uint64_t* value, DBImpl* /*db*/,
 
 bool InternalStats::HandleBlockCacheUsage(uint64_t* value, DBImpl* /*db*/,
                                           Version* /*version*/) {
-  auto* table_factory = cfd_->ioptions()->table_factory;
-  assert(table_factory != nullptr);
-  if (BlockBasedTableFactory::kName != table_factory->Name()) {
-    return false;
-  }
-  auto* table_options =
-      reinterpret_cast<BlockBasedTableOptions*>(table_factory->GetOptions());
-  auto block_cache = table_options->block_cache;
-  if (table_options->no_block_cache || block_cache == nullptr) {
+  Cache* block_cache;
+  bool ok = HandleBlockCacheStat(&block_cache);
+  if (!ok) {
     return false;
   }
   *value = static_cast<uint64_t>(block_cache->GetUsage());
@@ -866,15 +870,9 @@ bool InternalStats::HandleBlockCacheUsage(uint64_t* value, DBImpl* /*db*/,
 
 bool InternalStats::HandleBlockCachePinnedUsage(uint64_t* value, DBImpl* /*db*/,
                                                 Version* /*version*/) {
-  auto* table_factory = cfd_->ioptions()->table_factory;
-  assert(table_factory != nullptr);
-  if (BlockBasedTableFactory::kName != table_factory->Name()) {
-    return false;
-  }
-  auto* table_options =
-      reinterpret_cast<BlockBasedTableOptions*>(table_factory->GetOptions());
-  auto block_cache = table_options->block_cache;
-  if (table_options->no_block_cache || block_cache == nullptr) {
+  Cache* block_cache;
+  bool ok = HandleBlockCacheStat(&block_cache);
+  if (!ok) {
     return false;
   }
   *value = static_cast<uint64_t>(block_cache->GetPinnedUsage());
