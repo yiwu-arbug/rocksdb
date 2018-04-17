@@ -102,7 +102,7 @@ class Cache {
   // The type of the Cache
   virtual const char* Name() const = 0;
 
-  bool need_allocate() { return need_allocate_; }
+  virtual bool need_allocate() { return need_allocate_; }
   void set_need_allocate(bool v) { need_allocate_ = v; }
 
   virtual Status Allocate(const Slice& key, size_t length, char** buf,
