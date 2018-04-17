@@ -1,4 +1,13 @@
 # Rocksdb Change Log
+## Unreleased
+### Public API Change
+* Add a BlockBasedTableOption to align uncompressed data blocks on the smaller of block size or page size boundary, to reduce flash reads by avoiding reads spanning 4K pages.
+
+### New Features
+* Introduce TTL for level compaction so that all files older than ttl go through the compaction process to get rid of old data.
+* TransactionDBOptions::write_policy can be configured to enable WritePrepared 2PC transactions. Read more about them in the wiki.
+* Add DB properties "rocksdb.block-cache-capacity", "rocksdb.block-cache-usage", "rocksdb.block-cache-pinned-usage" to show block cache usage.
+
 ## 5.12.3 (04/09/2018)
 ### Bug Fixes
 * Fix memory leak when pin_l0_filter_and_index_blocks_in_cache is used with partitioned filters
