@@ -330,8 +330,11 @@ bool LRUCacheShard::Release(Cache::Handle* handle, bool force_erase) {
         usage_ -= e->charge;
         last_reference = true;
       } else {
-        LRU_Remove(e);
-        LRU_Insert(e);
+        if (delay_time_us_ == 0 ||
+            e->timestamp_us + delay_time_us_ <= env_->NowMicros()) {
+          LRU_Remove(e);
+          LRU_Insert(e);
+        }
       }
     }
   }
@@ -367,6 +370,9 @@ Status LRUCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   e->next = e->prev = nullptr;
   e->SetInCache(true);
   e->SetPriority(priority);
+  if (delay_time_us_ > 0) {
+    e->timestamp_us = env_->NowMicros();
+  }
   memcpy(e->key_data, key.data(), key.size());
 
   {

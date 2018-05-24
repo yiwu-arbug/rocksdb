@@ -408,6 +408,8 @@ DEFINE_double(cache_high_pri_pool_ratio, 0.0,
 DEFINE_bool(use_clock_cache, false,
             "Replace default LRU block cache with clock cache.");
 
+DEFINE_int64(cache_delay_time_us, 0, "");
+
 DEFINE_int64(simcache_size, -1,
              "Number of bytes to use as a simcache of "
              "uncompressed data. Nagative value disables simcache.");
@@ -2165,7 +2167,8 @@ class Benchmark {
     } else {
       return NewLRUCache((size_t)capacity, FLAGS_cache_numshardbits,
                          false /*strict_capacity_limit*/,
-                         FLAGS_cache_high_pri_pool_ratio);
+                         FLAGS_cache_high_pri_pool_ratio,
+                         FLAGS_cache_delay_time_us);
     }
   }
 
@@ -4533,7 +4536,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     Duration duration(FLAGS_duration, reads_);
     uint64_t num_seek_to_first = 0;
     uint64_t num_next = 0;
-    while (!duration.Done(1)) {
+    while (!duration.Done(0)) {
       if (!iter->Valid()) {
         iter->SeekToFirst();
         num_seek_to_first++;
@@ -4545,6 +4548,17 @@ void VerifyDBFromDB(std::string& truth_db_name) {
         iter->Next();
         num_next++;
       }
+
+      /*
+      for (int i = 0; i < 10; i++) {
+        std::string value;
+        Status ss = db_.db->Get(ReadOptions(), iter->key(), &value);
+        if (!ss.ok() || value != iter->value()) {
+          fprintf(stderr, "Value mismatch\n");
+          abort();
+        }
+      }
+      */
 
       thread->stats.FinishedOps(&db_, db_.db, 1, kSeek);
     }
