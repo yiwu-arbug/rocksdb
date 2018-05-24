@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include <memory>
 #include <string>
+#include "rocksdb/env.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
@@ -58,13 +59,20 @@ struct LRUCacheOptions {
   // BlockBasedTableOptions::cache_index_and_filter_blocks_with_high_priority.
   double high_pri_pool_ratio = 0.0;
 
+  uint64_t delay_time_us = 0;
+
+  Env* env = Env::Default();
+
   LRUCacheOptions() {}
   LRUCacheOptions(size_t _capacity, int _num_shard_bits,
-                  bool _strict_capacity_limit, double _high_pri_pool_ratio)
+                  bool _strict_capacity_limit, double _high_pri_pool_ratio,
+                  uint64_t _delay_time_us, Env* _env)
       : capacity(_capacity),
         num_shard_bits(_num_shard_bits),
         strict_capacity_limit(_strict_capacity_limit),
-        high_pri_pool_ratio(_high_pri_pool_ratio) {}
+        high_pri_pool_ratio(_high_pri_pool_ratio),
+        delay_time_us(_delay_time_us),
+        env(_env) {}
 };
 
 // Create a new cache with a fixed size capacity. The cache is sharded
@@ -78,7 +86,9 @@ struct LRUCacheOptions {
 extern std::shared_ptr<Cache> NewLRUCache(size_t capacity,
                                           int num_shard_bits = -1,
                                           bool strict_capacity_limit = false,
-                                          double high_pri_pool_ratio = 0.0);
+                                          double high_pri_pool_ratio = 0.0,
+                                          uint64_t delay_time_us = 0,
+                                          Env* env = Env::Default());
 
 extern std::shared_ptr<Cache> NewLRUCache(const LRUCacheOptions& cache_opts);
 

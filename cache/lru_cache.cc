@@ -100,12 +100,15 @@ void LRUHandleTable::Resize() {
 }
 
 LRUCacheShard::LRUCacheShard(size_t capacity, bool strict_capacity_limit,
-                             double high_pri_pool_ratio)
+                             double high_pri_pool_ratio, uint64_t delay_time_us,
+                             Env* env)
     : capacity_(0),
       high_pri_pool_usage_(0),
       strict_capacity_limit_(strict_capacity_limit),
       high_pri_pool_ratio_(high_pri_pool_ratio),
       high_pri_pool_capacity_(0),
+      delay_time_us_(delay_time_us),
+      env_(env),
       usage_(0),
       lru_usage_(0) {
   // Make empty circular linked list
@@ -120,6 +123,9 @@ LRUCacheShard::~LRUCacheShard() {}
 bool LRUCacheShard::Unref(LRUHandle* e) {
   assert(e->refs > 0);
   e->refs--;
+  if (e->InCache() && e->refs == 1) {
+    lru_usage_ += e->charge;
+  }
   return e->refs == 0;
 }
 
@@ -129,17 +135,18 @@ void LRUCacheShard::EraseUnRefEntries() {
   autovector<LRUHandle*> last_reference_list;
   {
     MutexLock l(&mutex_);
-    while (lru_.next != &lru_) {
-      LRUHandle* old = lru_.next;
-      assert(old->InCache());
-      assert(old->refs ==
-             1);  // LRU list contains elements which may be evicted
-      LRU_Remove(old);
-      table_.Remove(old->key(), old->hash);
-      old->SetInCache(false);
-      Unref(old);
-      usage_ -= old->charge;
-      last_reference_list.push_back(old);
+    LRUHandle* current = lru_.next;
+    while (current != &lru_) {
+      LRUHandle* old = current;
+      current = current->next;
+      if (old->InCache() && old->refs == 1) {
+        LRU_Remove(old);
+        table_.Remove(old->key(), old->hash);
+        old->SetInCache(false);
+        Unref(old);
+        usage_ -= old->charge;
+        last_reference_list.push_back(old);
+      }
     }
   }
 
@@ -168,7 +175,7 @@ void LRUCacheShard::TEST_GetLRUList(LRUHandle** lru, LRUHandle** lru_low_pri) {
 size_t LRUCacheShard::TEST_GetLRUSize() {
   LRUHandle* lru_handle = lru_.next;
   size_t lru_size = 0;
-  while (lru_handle != &lru_) {
+  while (lru_handle != &lru_ && lru_handle->refs == 1) {
     lru_size++;
     lru_handle = lru_handle->next;
   }
@@ -197,6 +204,7 @@ void LRUCacheShard::LRU_Remove(LRUHandle* e) {
 }
 
 void LRUCacheShard::LRU_Insert(LRUHandle* e) {
+  assert(e != nullptr);
   assert(e->next == nullptr);
   assert(e->prev == nullptr);
   if (high_pri_pool_ratio_ > 0 && (e->IsHighPri() || e->HasHit())) {
@@ -218,7 +226,9 @@ void LRUCacheShard::LRU_Insert(LRUHandle* e) {
     e->SetInHighPriPool(false);
     lru_low_pri_ = e;
   }
-  lru_usage_ += e->charge;
+  if (e->InCache() && e->refs == 1) {
+    lru_usage_ += e->charge;
+  }
 }
 
 void LRUCacheShard::MaintainPoolSize() {
@@ -233,16 +243,18 @@ void LRUCacheShard::MaintainPoolSize() {
 
 void LRUCacheShard::EvictFromLRU(size_t charge,
                                  autovector<LRUHandle*>* deleted) {
-  while (usage_ + charge > capacity_ && lru_.next != &lru_) {
-    LRUHandle* old = lru_.next;
-    assert(old->InCache());
-    assert(old->refs == 1);  // LRU list contains elements which may be evicted
-    LRU_Remove(old);
-    table_.Remove(old->key(), old->hash);
-    old->SetInCache(false);
-    Unref(old);
-    usage_ -= old->charge;
-    deleted->push_back(old);
+  LRUHandle* current = lru_.next;
+  while (usage_ + charge > capacity_ && current != &lru_) {
+    LRUHandle* old = current;
+    current = old->next;
+    if (old->InCache() && old->refs == 1) {
+      LRU_Remove(old);
+      table_.Remove(old->key(), old->hash);
+      old->SetInCache(false);
+      Unref(old);
+      usage_ -= old->charge;
+      deleted->push_back(old);
+    }
   }
 }
 
@@ -272,7 +284,7 @@ Cache::Handle* LRUCacheShard::Lookup(const Slice& key, uint32_t hash) {
   if (e != nullptr) {
     assert(e->InCache());
     if (e->refs == 1) {
-      LRU_Remove(e);
+      lru_usage_ -= e->charge;
     }
     e->refs++;
     e->SetHit();
@@ -283,9 +295,6 @@ Cache::Handle* LRUCacheShard::Lookup(const Slice& key, uint32_t hash) {
 bool LRUCacheShard::Ref(Cache::Handle* h) {
   LRUHandle* handle = reinterpret_cast<LRUHandle*>(h);
   MutexLock l(&mutex_);
-  if (handle->InCache() && handle->refs == 1) {
-    LRU_Remove(handle);
-  }
   handle->refs++;
   return true;
 }
@@ -312,17 +321,16 @@ bool LRUCacheShard::Release(Cache::Handle* handle, bool force_erase) {
     if (e->refs == 1 && e->InCache()) {
       // The item is still in cache, and nobody else holds a reference to it
       if (usage_ > capacity_ || force_erase) {
-        // the cache is full
-        // The LRU list must be empty since the cache is full
-        assert(!(usage_ > capacity_) || lru_.next == &lru_);
+        // the cache is full or erase requested
         // take this opportunity and remove the item
+        LRU_Remove(e);
         table_.Remove(e->key(), e->hash);
         e->SetInCache(false);
         Unref(e);
         usage_ -= e->charge;
         last_reference = true;
       } else {
-        // put the item on the list to be potentially freed
+        LRU_Remove(e);
         LRU_Insert(e);
       }
     }
@@ -368,8 +376,7 @@ Status LRUCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
     // is freed or the lru list is empty
     EvictFromLRU(charge, &last_reference_list);
 
-    if (usage_ - lru_usage_ + charge > capacity_ &&
-        (strict_capacity_limit_ || handle == nullptr)) {
+    if (usage_ + charge > capacity_ && strict_capacity_limit_) {
       if (handle == nullptr) {
         // Don't insert the entry but still return ok, as if the entry inserted
         // into cache and get evicted immediately.
@@ -383,21 +390,20 @@ Status LRUCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
       // insert into the cache
       // note that the cache might get larger than its capacity if not enough
       // space was freed
+      LRU_Insert(e);
       LRUHandle* old = table_.Insert(e);
       usage_ += e->charge;
       if (old != nullptr) {
+        LRU_Remove(old);
         old->SetInCache(false);
         if (Unref(old)) {
           usage_ -= old->charge;
           // old is on LRU because it's in cache and its reference count
           // was just 1 (Unref returned 0)
-          LRU_Remove(old);
           last_reference_list.push_back(old);
         }
       }
-      if (handle == nullptr) {
-        LRU_Insert(e);
-      } else {
+      if (handle != nullptr) {
         *handle = reinterpret_cast<Cache::Handle*>(e);
       }
       s = Status::OK();
@@ -420,12 +426,10 @@ void LRUCacheShard::Erase(const Slice& key, uint32_t hash) {
     MutexLock l(&mutex_);
     e = table_.Remove(key, hash);
     if (e != nullptr) {
+      LRU_Remove(e);
       last_reference = Unref(e);
       if (last_reference) {
         usage_ -= e->charge;
-      }
-      if (last_reference && e->InCache()) {
-        LRU_Remove(e);
       }
       e->SetInCache(false);
     }
@@ -461,15 +465,16 @@ std::string LRUCacheShard::GetPrintableOptions() const {
 }
 
 LRUCache::LRUCache(size_t capacity, int num_shard_bits,
-                   bool strict_capacity_limit, double high_pri_pool_ratio)
+                   bool strict_capacity_limit, double high_pri_pool_ratio,
+                   uint64_t delay_time_us, Env* env)
     : ShardedCache(capacity, num_shard_bits, strict_capacity_limit) {
   num_shards_ = 1 << num_shard_bits;
   shards_ = reinterpret_cast<LRUCacheShard*>(
       port::cacheline_aligned_alloc(sizeof(LRUCacheShard) * num_shards_));
   size_t per_shard = (capacity + (num_shards_ - 1)) / num_shards_;
   for (int i = 0; i < num_shards_; i++) {
-    new (&shards_[i])
-        LRUCacheShard(per_shard, strict_capacity_limit, high_pri_pool_ratio);
+    new (&shards_[i]) LRUCacheShard(per_shard, strict_capacity_limit,
+                                    high_pri_pool_ratio, delay_time_us, env);
   }
 }
 
@@ -526,12 +531,14 @@ double LRUCache::GetHighPriPoolRatio() {
 std::shared_ptr<Cache> NewLRUCache(const LRUCacheOptions& cache_opts) {
   return NewLRUCache(cache_opts.capacity, cache_opts.num_shard_bits,
                      cache_opts.strict_capacity_limit,
-                     cache_opts.high_pri_pool_ratio);
+                     cache_opts.high_pri_pool_ratio, cache_opts.delay_time_us,
+                     cache_opts.env);
 }
 
 std::shared_ptr<Cache> NewLRUCache(size_t capacity, int num_shard_bits,
                                    bool strict_capacity_limit,
-                                   double high_pri_pool_ratio) {
+                                   double high_pri_pool_ratio,
+                                   uint64_t delay_time_us, Env* env) {
   if (num_shard_bits >= 20) {
     return nullptr;  // the cache cannot be sharded into too many fine pieces
   }
@@ -543,7 +550,8 @@ std::shared_ptr<Cache> NewLRUCache(size_t capacity, int num_shard_bits,
     num_shard_bits = GetDefaultCacheShardBits(capacity);
   }
   return std::make_shared<LRUCache>(capacity, num_shard_bits,
-                                    strict_capacity_limit, high_pri_pool_ratio);
+                                    strict_capacity_limit, high_pri_pool_ratio,
+                                    delay_time_us, env);
 }
 
 }  // namespace rocksdb

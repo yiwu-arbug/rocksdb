@@ -51,6 +51,7 @@ struct LRUHandle {
   LRUHandle* prev;
   size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
+  uint64_t timestamp_us;
   uint32_t refs;     // a number of refs to this entry
                      // cache itself is counted as 1
 
@@ -160,7 +161,8 @@ class LRUHandleTable {
 class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
  public:
   LRUCacheShard(size_t capacity, bool strict_capacity_limit,
-                double high_pri_pool_ratio);
+                double high_pri_pool_ratio, uint64_t delay_time_us = 0,
+                Env* env = Env::Default());
   virtual ~LRUCacheShard();
 
   // Separate from constructor so caller can easily make an array of LRUCache
@@ -243,6 +245,10 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   // Remember the value to avoid recomputing each time.
   double high_pri_pool_capacity_;
 
+  uint64_t delay_time_us_;
+
+  Env* env_;
+
   // Dummy head of LRU list.
   // lru.prev is newest entry, lru.next is oldest entry.
   // LRU contains items which can be evicted, ie reference only by cache
@@ -279,7 +285,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
 class LRUCache : public ShardedCache {
  public:
   LRUCache(size_t capacity, int num_shard_bits, bool strict_capacity_limit,
-           double high_pri_pool_ratio);
+           double high_pri_pool_ratio, uint64_t delay_time_us = 0,
+           Env* env = Env::Default());
   virtual ~LRUCache();
   virtual const char* Name() const override { return "LRUCache"; }
   virtual CacheShard* GetShard(int shard) override;
