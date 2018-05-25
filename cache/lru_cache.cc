@@ -485,10 +485,12 @@ LRUCache::LRUCache(size_t capacity, int num_shard_bits,
 }
 
 LRUCache::~LRUCache() {
-  for (int i = 0; i < num_shards_; i++) {
-    shards_[i].~LRUCacheShard();
+  if (shards_ != nullptr) {
+    for (int i = 0; i < num_shards_; i++) {
+      shards_[i].~LRUCacheShard();
+    }
+    port::cacheline_aligned_free(shards_);
   }
-  port::cacheline_aligned_free(shards_);
 }
 
 CacheShard* LRUCache::GetShard(int shard) {
