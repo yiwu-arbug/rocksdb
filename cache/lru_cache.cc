@@ -330,8 +330,17 @@ bool LRUCacheShard::Release(Cache::Handle* handle, bool force_erase) {
         usage_ -= e->charge;
         last_reference = true;
       } else {
-        if (delay_time_us_ == 0 ||
-            e->timestamp_us + delay_time_us_ <= env_->NowMicros()) {
+        bool do_move = false;
+        if (delay_time_us_ == 0) {
+          do_move = true;
+        } else {
+          uint64_t now = env_->NowMicros();
+          if (e->timestamp_us + delay_time_us_ <= now) {
+            do_move = true;
+            e->timestamp_us = now;
+          }
+        }
+        if (do_move) {
           LRU_Remove(e);
           LRU_Insert(e);
         }
