@@ -280,6 +280,10 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   // We don't count mutex_ as the cache's internal state so semantically we
   // don't mind mutex_ invoking the non-const actions.
   mutable port::Mutex mutex_;
+
+  size_t release_count_ = 0;
+  size_t try_move_count_ = 0;
+  size_t move_count_ = 0;
 };
 
 class LRUCache : public ShardedCache {

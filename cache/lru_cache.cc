@@ -118,7 +118,10 @@ LRUCacheShard::LRUCacheShard(size_t capacity, bool strict_capacity_limit,
   SetCapacity(capacity);
 }
 
-LRUCacheShard::~LRUCacheShard() {}
+LRUCacheShard::~LRUCacheShard() {
+  printf("capacity %lu, release %lu, try move %lu, move %lu\n",
+      capacity_, release_count_, try_move_count_, move_count_);
+}
 
 bool LRUCacheShard::Unref(LRUHandle* e) {
   assert(e->refs > 0);
@@ -310,6 +313,7 @@ bool LRUCacheShard::Release(Cache::Handle* handle, bool force_erase) {
   if (handle == nullptr) {
     return false;
   }
+  release_count_++;
   LRUHandle* e = reinterpret_cast<LRUHandle*>(handle);
   bool last_reference = false;
   {
@@ -331,6 +335,7 @@ bool LRUCacheShard::Release(Cache::Handle* handle, bool force_erase) {
         last_reference = true;
       } else {
         bool do_move = false;
+        try_move_count_++;
         if (delay_time_us_ == 0) {
           do_move = true;
         } else {
@@ -341,6 +346,7 @@ bool LRUCacheShard::Release(Cache::Handle* handle, bool force_erase) {
           }
         }
         if (do_move) {
+          move_count_++;
           LRU_Remove(e);
           LRU_Insert(e);
         }
@@ -525,7 +531,7 @@ uint32_t LRUCache::GetHash(Handle* handle) const {
 void LRUCache::DisownData() {
 // Do not drop data if compile with ASAN to suppress leak warning.
 #ifndef __SANITIZE_ADDRESS__
-  shards_ = nullptr;
+  // shards_ = nullptr;
 #endif  // !__SANITIZE_ADDRESS__
 }
 
