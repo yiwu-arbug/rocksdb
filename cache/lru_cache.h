@@ -8,6 +8,8 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #pragma once
 
+#include <atomic>
+#include <limits>
 #include <string>
 
 #include "cache/sharded_cache.h"
@@ -51,14 +53,17 @@ struct LRUHandle {
   LRUHandle* prev;
   size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
-  uint64_t timestamp_us;
-  uint32_t refs;     // a number of refs to this entry
-                     // cache itself is counted as 1
+  std::atomic<uint64_t> access_time_us;
+
+  // The lowest bit is used to denote whether this entry is reference by the
+  // cache itself (i.e. in the hash table and LRU list).
+  // The rest of bits is reference count of the entry
+  std::atomic<uint32_t> refs{0};
 
   // Include the following flags:
-  //   in_cache:    whether this entry is referenced by the hash table.
   //   is_high_pri: whether this entry is high priority entry.
   //   in_high_pri_pool: whether this entry is in high-pri pool.
+  //   has_hit: whether this entry get hit after inserted in cache.
   char flags;
 
   uint32_t hash;     // Hash of key(); used for fast sharding and comparisons
@@ -75,39 +80,62 @@ struct LRUHandle {
     }
   }
 
-  bool InCache() { return flags & 1; }
-  bool IsHighPri() { return flags & 2; }
-  bool InHighPriPool() { return flags & 4; }
-  bool HasHit() { return flags & 8; }
+  bool IsHighPri() { return flags & 1; }
+  bool InHighPriPool() { return flags & 2; }
+  bool HasHit() { return flags & 4; }
 
-  void SetInCache(bool in_cache) {
-    if (in_cache) {
+  uint32_t SetInCache() {
+    uint32_t r = refs.fetch_add(1);
+    assert((r & 1) == 0);
+    return r;
+  }
+
+  uint32_t UnsetInCache() {
+    uint32_t r = refs.fetch_sub(1);
+    assert((r & 1) == 1);
+    return r - 1;
+  }
+
+  uint32_t Ref() {
+    uint32_t r = refs.fetch_add(2);
+    assert(r + 2 <= std::numeric_limits<uint32_t>::max());
+    return r;
+  }
+
+  uint32_t Unref() {
+    uint32_t r = refs.fetch_sub(2);
+    assert(r >= 2);
+    return r - 2;
+  }
+
+  void SetPriority(Cache::Priority priority) {
+    if (priority == Cache::Priority::HIGH) {
       flags |= 1;
     } else {
       flags &= ~1;
     }
   }
 
-  void SetPriority(Cache::Priority priority) {
-    if (priority == Cache::Priority::HIGH) {
+  void SetInHighPriPool(bool in_high_pri_pool) {
+    if (in_high_pri_pool) {
       flags |= 2;
     } else {
       flags &= ~2;
     }
   }
 
-  void SetInHighPriPool(bool in_high_pri_pool) {
-    if (in_high_pri_pool) {
-      flags |= 4;
-    } else {
-      flags &= ~4;
-    }
+  void SetHit() { flags |= 4; }
+
+  uint64_t access_time() const {
+    return access_time_us.load(std::memory_order_relaxed);
   }
 
-  void SetHit() { flags |= 8; }
+  void set_access_time(uint64_t time) {
+    access_time_us.store(time, std::memory_order_relaxed);
+  }
 
   void Free() {
-    assert((refs == 1 && InCache()) || (refs == 0 && !InCache()));
+    assert(refs == 0);
     if (deleter) {
       (*deleter)(key(), value);
     }
@@ -135,7 +163,6 @@ class LRUHandleTable {
       LRUHandle* h = list_[i];
       while (h != nullptr) {
         auto n = h->next_hash;
-        assert(h->InCache());
         func(h);
         h = n;
       }
@@ -161,7 +188,7 @@ class LRUHandleTable {
 class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
  public:
   LRUCacheShard(size_t capacity, bool strict_capacity_limit,
-                double high_pri_pool_ratio, uint64_t delay_time_us = 0,
+                double high_pri_pool_ratio, uint64_t refresh_timeout = 0,
                 Env* env = Env::Default());
   virtual ~LRUCacheShard();
 
@@ -220,8 +247,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   void MaintainPoolSize();
 
   // Just reduce the reference count by 1.
-  // Return true if last reference
-  bool Unref(LRUHandle* e);
+  // Return e->refs after the operation.
+  uint32_t Unref(LRUHandle* e);
 
   // Free some space following strict LRU policy until enough space
   // to hold (usage_ + charge) is freed or the lru list is empty
@@ -245,7 +272,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   // Remember the value to avoid recomputing each time.
   double high_pri_pool_capacity_;
 
-  uint64_t delay_time_us_;
+  uint64_t refresh_timeout_;
 
   Env* env_;
 
@@ -274,7 +301,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   size_t usage_;
 
   // Memory size for entries residing only in the LRU list
-  size_t lru_usage_;
+  std::atomic<size_t> lru_usage_;
 
   // mutex_ protects the following state.
   // We don't count mutex_ as the cache's internal state so semantically we
@@ -289,7 +316,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
 class LRUCache : public ShardedCache {
  public:
   LRUCache(size_t capacity, int num_shard_bits, bool strict_capacity_limit,
-           double high_pri_pool_ratio, uint64_t delay_time_us = 0,
+           double high_pri_pool_ratio, uint64_t refresh_timeout = 0,
            Env* env = Env::Default());
   virtual ~LRUCache();
   virtual const char* Name() const override { return "LRUCache"; }

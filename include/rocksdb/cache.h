@@ -59,19 +59,19 @@ struct LRUCacheOptions {
   // BlockBasedTableOptions::cache_index_and_filter_blocks_with_high_priority.
   double high_pri_pool_ratio = 0.0;
 
-  uint64_t delay_time_us = 0;
+  uint64_t refresh_timeout = 0;
 
   Env* env = Env::Default();
 
   LRUCacheOptions() {}
   LRUCacheOptions(size_t _capacity, int _num_shard_bits,
                   bool _strict_capacity_limit, double _high_pri_pool_ratio,
-                  uint64_t _delay_time_us, Env* _env)
+                  uint64_t _refresh_timeout, Env* _env)
       : capacity(_capacity),
         num_shard_bits(_num_shard_bits),
         strict_capacity_limit(_strict_capacity_limit),
         high_pri_pool_ratio(_high_pri_pool_ratio),
-        delay_time_us(_delay_time_us),
+        refresh_timeout(_refresh_timeout),
         env(_env) {}
 };
 
@@ -87,7 +87,7 @@ extern std::shared_ptr<Cache> NewLRUCache(size_t capacity,
                                           int num_shard_bits = -1,
                                           bool strict_capacity_limit = false,
                                           double high_pri_pool_ratio = 0.0,
-                                          uint64_t delay_time_us = 0,
+                                          uint64_t refresh_timeout = 0,
                                           Env* env = Env::Default());
 
 extern std::shared_ptr<Cache> NewLRUCache(const LRUCacheOptions& cache_opts);
