@@ -105,9 +105,7 @@ LRUCacheShard::LRUCacheShard(size_t capacity, bool strict_capacity_limit,
       high_pri_pool_usage_(0),
       strict_capacity_limit_(strict_capacity_limit),
       high_pri_pool_ratio_(high_pri_pool_ratio),
-      high_pri_pool_capacity_(0),
-      usage_(0),
-      lru_usage_(0) {
+      high_pri_pool_capacity_(0) {
   // Make empty circular linked list
   lru_.next = &lru_;
   lru_.prev = &lru_;
@@ -117,29 +115,61 @@ LRUCacheShard::LRUCacheShard(size_t capacity, bool strict_capacity_limit,
 
 LRUCacheShard::~LRUCacheShard() {}
 
+bool LRUCacheShard::Ref(LRUHandle* e) {
+  uint32_t refs = e->refs.fetch_add(2);
+  if (RefCount(refs) == 0) {
+    // Not being pinned before.
+    pinned_usage_.fetch_add(e->charge);
+  }
+  return true;
+}
+
 bool LRUCacheShard::Unref(LRUHandle* e) {
-  assert(e->refs > 0);
-  e->refs--;
-  return e->refs == 0;
+  // Remember e->charge before unref, otherwise it is unsafe access.
+  uint32_t charge = e->charge;
+  uint32_t refs = e->refs.fetch_sub(2);
+  bool last_reference = false;
+  if (RefCount(refs) <= 1) {
+    // last external reference
+    pinned_usage_.fetch_sub(charge, std::memory_order_relaxed);
+    if (!InCache(refs)) {
+      // Not even reference in cache, so this is the last reference.
+      usage_.fetch_sub(charge, std::memory_order_relaxed);
+      last_reference = true;
+    }
+  }
+  return last_reference;
+}
+
+bool LRUCacheShard::UnsetInCache(LRUHandle* e) {
+  // Remember e->charge before unref, otherwise it is unsafe access.
+  uint32_t charge = e->charge;
+  uint32_t refs = e->refs.fetch_sub(1);
+  bool last_reference = false;
+  if (RefCount(refs) == 0) {
+    usage_.fetch_sub(charge, std::memory_order_relaxed);
+    last_reference = true;
+  }
+  return last_reference;
 }
 
 // Call deleter and free
 
 void LRUCacheShard::EraseUnRefEntries() {
   autovector<LRUHandle*> last_reference_list;
+  size_t total_charge = 0;
   {
     MutexLock l(&mutex_);
-    while (lru_.next != &lru_) {
-      LRUHandle* old = lru_.next;
-      assert(old->InCache());
-      assert(old->refs ==
-             1);  // LRU list contains elements which may be evicted
-      LRU_Remove(old);
-      table_.Remove(old->key(), old->hash);
-      old->SetInCache(false);
-      Unref(old);
-      usage_ -= old->charge;
-      last_reference_list.push_back(old);
+    LRUHandle* current = lru_.next;
+    while (current != &lru_) {
+      LRUHandle* old = current;
+      current = old->next;
+      if (RefCount(old->refs.load()) == 0) {
+        table_.Remove(old->key(), old->hash);
+        LRU_Remove(old);
+        UnsetInCache(old);
+        last_reference_list.push_back(old);
+      }
     }
   }
 
@@ -168,7 +198,7 @@ void LRUCacheShard::TEST_GetLRUList(LRUHandle** lru, LRUHandle** lru_low_pri) {
 size_t LRUCacheShard::TEST_GetLRUSize() {
   LRUHandle* lru_handle = lru_.next;
   size_t lru_size = 0;
-  while (lru_handle != &lru_) {
+  while (lru_handle != &lru_ && RefCount(lru_handle->refs.load()) == 0) {
     lru_size++;
     lru_handle = lru_handle->next;
   }
@@ -189,7 +219,6 @@ void LRUCacheShard::LRU_Remove(LRUHandle* e) {
   e->next->prev = e->prev;
   e->prev->next = e->next;
   e->prev = e->next = nullptr;
-  lru_usage_ -= e->charge;
   if (e->InHighPriPool()) {
     assert(high_pri_pool_usage_ >= e->charge);
     high_pri_pool_usage_ -= e->charge;
@@ -218,7 +247,6 @@ void LRUCacheShard::LRU_Insert(LRUHandle* e) {
     e->SetInHighPriPool(false);
     lru_low_pri_ = e;
   }
-  lru_usage_ += e->charge;
 }
 
 void LRUCacheShard::MaintainPoolSize() {
@@ -233,16 +261,18 @@ void LRUCacheShard::MaintainPoolSize() {
 
 void LRUCacheShard::EvictFromLRU(size_t charge,
                                  autovector<LRUHandle*>* deleted) {
-  while (usage_ + charge > capacity_ && lru_.next != &lru_) {
+  size_t usage = usage_.load(std::memory_order_relaxed);
+  while (usage + charge > capacity_ && lru_.next != &lru_) {
     LRUHandle* old = lru_.next;
-    assert(old->InCache());
-    assert(old->refs == 1);  // LRU list contains elements which may be evicted
+    assert(InCache(old->refs.load()));
     LRU_Remove(old);
     table_.Remove(old->key(), old->hash);
-    old->SetInCache(false);
-    Unref(old);
-    usage_ -= old->charge;
-    deleted->push_back(old);
+    // We may remove entries which still has external reference.
+    bool last_reference = UnsetInCache(old);
+    if (last_reference) {
+      usage = usage_.load(std::memory_order_relaxed);
+      deleted->push_back(old);
+    }
   }
 }
 
@@ -270,24 +300,19 @@ Cache::Handle* LRUCacheShard::Lookup(const Slice& key, uint32_t hash) {
   MutexLock l(&mutex_);
   LRUHandle* e = table_.Lookup(key, hash);
   if (e != nullptr) {
-    assert(e->InCache());
-    if (e->refs == 1) {
-      LRU_Remove(e);
-    }
-    e->refs++;
+    assert(InCache(e->refs.load()));
+    // Refresh LRU position.
+    LRU_Remove(e);
+    LRU_Insert(e);
+    Ref(e);
     e->SetHit();
   }
   return reinterpret_cast<Cache::Handle*>(e);
 }
 
 bool LRUCacheShard::Ref(Cache::Handle* h) {
-  LRUHandle* handle = reinterpret_cast<LRUHandle*>(h);
-  MutexLock l(&mutex_);
-  if (handle->InCache() && handle->refs == 1) {
-    LRU_Remove(handle);
-  }
-  handle->refs++;
-  return true;
+  LRUHandle* e = reinterpret_cast<LRUHandle*>(h);
+  return Ref(e);
 }
 
 void LRUCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
@@ -303,32 +328,17 @@ bool LRUCacheShard::Release(Cache::Handle* handle, bool force_erase) {
   }
   LRUHandle* e = reinterpret_cast<LRUHandle*>(handle);
   bool last_reference = false;
-  {
+  if (force_erase) {
     MutexLock l(&mutex_);
-    last_reference = Unref(e);
-    if (last_reference) {
-      usage_ -= e->charge;
-    }
-    if (e->refs == 1 && e->InCache()) {
-      // The item is still in cache, and nobody else holds a reference to it
-      if (usage_ > capacity_ || force_erase) {
-        // the cache is full
-        // The LRU list must be empty since the cache is full
-        assert(!(usage_ > capacity_) || lru_.next == &lru_);
-        // take this opportunity and remove the item
-        table_.Remove(e->key(), e->hash);
-        e->SetInCache(false);
-        Unref(e);
-        usage_ -= e->charge;
-        last_reference = true;
-      } else {
-        // put the item on the list to be potentially freed
-        LRU_Insert(e);
-      }
+    if (InCache(e->refs.load())) {
+      table_.Remove(e->key(), e->hash);
+      LRU_Remove(e);
+      last_reference = UnsetInCache(e);
+      assert(!last_reference);
     }
   }
-
-  // free outside of mutex
+  // Unref without hold mutex.
+  last_reference = Unref(e);
   if (last_reference) {
     e->Free();
   }
@@ -351,13 +361,11 @@ Status LRUCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   e->deleter = deleter;
   e->charge = charge;
   e->key_length = key.size();
+  e->refs.store(
+      handle == nullptr ? 1 : 3);  // 1 for cache + 2 for the returned handle
   e->flags = 0;
   e->hash = hash;
-  e->refs = (handle == nullptr
-                 ? 1
-                 : 2);  // One from LRUCache, one for the returned handle
   e->next = e->prev = nullptr;
-  e->SetInCache(true);
   e->SetPriority(priority);
   memcpy(e->key_data, key.data(), key.size());
 
@@ -368,7 +376,8 @@ Status LRUCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
     // is freed or the lru list is empty
     EvictFromLRU(charge, &last_reference_list);
 
-    if (usage_ - lru_usage_ + charge > capacity_ &&
+    size_t pinned_usage = pinned_usage_.load(std::memory_order_relaxed);
+    if (pinned_usage + charge > capacity_ &&
         (strict_capacity_limit_ || handle == nullptr)) {
       if (handle == nullptr) {
         // Don't insert the entry but still return ok, as if the entry inserted
@@ -384,21 +393,18 @@ Status LRUCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
       // note that the cache might get larger than its capacity if not enough
       // space was freed
       LRUHandle* old = table_.Insert(e);
-      usage_ += e->charge;
+      LRU_Insert(e);
       if (old != nullptr) {
-        old->SetInCache(false);
-        if (Unref(old)) {
-          usage_ -= old->charge;
-          // old is on LRU because it's in cache and its reference count
-          // was just 1 (Unref returned 0)
-          LRU_Remove(old);
+        LRU_Remove(old);
+        bool last_reference = UnsetInCache(old);
+        if (last_reference) {
           last_reference_list.push_back(old);
         }
       }
-      if (handle == nullptr) {
-        LRU_Insert(e);
-      } else {
+      usage_.fetch_add(e->charge, std::memory_order_relaxed);
+      if (handle != nullptr) {
         *handle = reinterpret_cast<Cache::Handle*>(e);
+        pinned_usage_.fetch_add(e->charge, std::memory_order_relaxed);
       }
       s = Status::OK();
     }
@@ -420,14 +426,8 @@ void LRUCacheShard::Erase(const Slice& key, uint32_t hash) {
     MutexLock l(&mutex_);
     e = table_.Remove(key, hash);
     if (e != nullptr) {
-      last_reference = Unref(e);
-      if (last_reference) {
-        usage_ -= e->charge;
-      }
-      if (last_reference && e->InCache()) {
-        LRU_Remove(e);
-      }
-      e->SetInCache(false);
+      LRU_Remove(e);
+      last_reference = UnsetInCache(e);
     }
   }
 
@@ -439,14 +439,11 @@ void LRUCacheShard::Erase(const Slice& key, uint32_t hash) {
 }
 
 size_t LRUCacheShard::GetUsage() const {
-  MutexLock l(&mutex_);
-  return usage_;
+  return usage_.load(std::memory_order_relaxed);
 }
 
 size_t LRUCacheShard::GetPinnedUsage() const {
-  MutexLock l(&mutex_);
-  assert(usage_ >= lru_usage_);
-  return usage_ - lru_usage_;
+  return pinned_usage_.load(std::memory_order_relaxed);
 }
 
 std::string LRUCacheShard::GetPrintableOptions() const {
