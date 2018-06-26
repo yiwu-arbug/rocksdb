@@ -8,10 +8,10 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #pragma once
 
+#include <atomic>
 #include <string>
 
 #include "cache/sharded_cache.h"
-
 #include "port/port.h"
 #include "util/autovector.h"
 
@@ -43,6 +43,22 @@ namespace rocksdb {
 // matching
 // RUCache::Release (to move into state 2) or LRUCacheShard::Erase (for state 3)
 
+namespace {
+
+// Constants and helper functions to operate reference count.
+
+constexpr uint32_t IN_TABLE_BIT = 1;
+constexpr uint32_t IN_LRU_BIT = 2;
+constexpr uint32_t REF_COUNT = 4;
+
+bool in_table(uint32_t refs) { return refs & IN_TABLE_BIT; }
+
+bool in_lru(uint32_t refs) { return refs & IN_LRU_BIT; }
+
+bool is_pinned(uint32_t refs) { return refs >= REF_COUNT; }
+
+}  // namespace
+
 struct LRUHandle {
   void* value;
   void (*deleter)(const Slice&, void* value);
@@ -51,13 +67,23 @@ struct LRUHandle {
   LRUHandle* prev;
   size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
-  uint32_t refs;     // a number of refs to this entry
-                     // cache itself is counted as 1
+
+  // References by hash table, LRU list and external reference, in the
+  // following structure:
+  //
+  //   +----------+---------+-----------------+
+  //   | in_table | in_lru  | reference_count |
+  //   | (1 bit)  | (1 bit) |    (30 bits)    |
+  //   +----------+---------+-----------------+
+  //
+  // Since refs is used for synchronization, all access should use
+  // std::memory_order_seq_cst.
+  std::atomic<uint32_t> refs;
 
   // Include the following flags:
-  //   in_cache:    whether this entry is referenced by the hash table.
-  //   is_high_pri: whether this entry is high priority entry.
+  //   is_high_pri     : whether this entry is high priority entry.
   //   in_high_pri_pool: whether this entry is in high-pri pool.
+  //   has_hit         : whether this entry has hit after inserted into cache.
   char flags;
 
   uint32_t hash;     // Hash of key(); used for fast sharding and comparisons
@@ -74,36 +100,27 @@ struct LRUHandle {
     }
   }
 
-  bool InCache() { return flags & 1; }
-  bool IsHighPri() { return flags & 2; }
-  bool InHighPriPool() { return flags & 4; }
-  bool HasHit() { return flags & 8; }
+  bool IsHighPri() { return flags & 1; }
+  bool InHighPriPool() { return flags & 2; }
+  bool HasHit() { return flags & 4; }
 
-  void SetInCache(bool in_cache) {
-    if (in_cache) {
+  void SetPriority(Cache::Priority priority) {
+    if (priority == Cache::Priority::HIGH) {
       flags |= 1;
     } else {
       flags &= ~1;
     }
   }
 
-  void SetPriority(Cache::Priority priority) {
-    if (priority == Cache::Priority::HIGH) {
+  void SetInHighPriPool(bool in_high_pri_pool) {
+    if (in_high_pri_pool) {
       flags |= 2;
     } else {
       flags &= ~2;
     }
   }
 
-  void SetInHighPriPool(bool in_high_pri_pool) {
-    if (in_high_pri_pool) {
-      flags |= 4;
-    } else {
-      flags &= ~4;
-    }
-  }
-
-  void SetHit() { flags |= 8; }
+  void SetHit() { flags |= 4; }
 
   void Free() {
     assert((refs == 1 && InCache()) || (refs == 0 && !InCache()));
@@ -202,7 +219,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
 
   void TEST_GetLRUList(LRUHandle** lru, LRUHandle** lru_low_pri);
 
-  //  Retrieves number of elements in LRU, for unit test purpose only
+  //  Retrieves number of unpinned entries in LRU, for unit test purpose only
   //  not threadsafe
   size_t TEST_GetLRUSize();
 
@@ -216,10 +233,6 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   // Overflow the last entry in high-pri pool to low-pri pool until size of
   // high-pri pool is no larger than the size specify by high_pri_pool_pct.
   void MaintainPoolSize();
-
-  // Just reduce the reference count by 1.
-  // Return true if last reference
-  bool Unref(LRUHandle* e);
 
   // Free some space following strict LRU policy until enough space
   // to hold (usage_ + charge) is freed or the lru list is empty
@@ -265,10 +278,12 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   LRUHandleTable table_;
 
   // Memory size for entries residing in the cache
-  size_t usage_;
+  // Not used for synchronization. Access with std::memory_order_relaxed.
+  std::atomic<size_t> usage_;
 
-  // Memory size for entries residing only in the LRU list
-  size_t lru_usage_;
+  // Memory size for entries being pinned.
+  // Not used for synchronization. Access with std::memory_order_relaxed.
+  std::atomic<size_t> pinned_usage_;
 
   // mutex_ protects the following state.
   // We don't count mutex_ as the cache's internal state so semantically we
