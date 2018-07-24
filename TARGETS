@@ -171,6 +171,7 @@ cpp_library(
         "table/cuckoo_table_builder.cc",
         "table/cuckoo_table_factory.cc",
         "table/cuckoo_table_reader.cc",
+        "table/data_block_hash_index.cc",
         "table/flush_block_policy.cc",
         "table/format.cc",
         "table/full_filter_block.cc",
@@ -371,6 +372,11 @@ ROCKS_TESTS = [
     [
         "block_based_filter_block_test",
         "table/block_based_filter_block_test.cc",
+        "serial",
+    ],
+    [
+        "data_block_hash_index_test",
+        "table/data_block_hash_index_test.cc",
         "serial",
     ],
     [
@@ -1086,4 +1092,3 @@ if not is_opt_mode:
           deps = [":" + test_bin],
           command = [TEST_RUNNER, BUCK_BINS + test_bin]
         )
-
