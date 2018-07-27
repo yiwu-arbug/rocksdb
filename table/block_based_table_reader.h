@@ -93,7 +93,8 @@ class BlockBasedTable : public TableReader {
                      const SliceTransform* prefix_extractor = nullptr,
                      bool prefetch_index_and_filter_in_cache = true,
                      bool skip_filters = false, int level = -1,
-                     const bool immortal_table = false);
+                     const bool immortal_table = false,
+                     const SequenceNumber largest_seqno = 0);
 
   bool PrefixMayMatch(const Slice& internal_key,
                       const ReadOptions& read_options,
