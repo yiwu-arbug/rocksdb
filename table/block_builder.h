@@ -12,6 +12,8 @@
 
 #include <stdint.h>
 #include "rocksdb/slice.h"
+#include "rocksdb/table.h"
+#include "table/data_block_hash_index.h"
 
 namespace rocksdb {
 
@@ -21,7 +23,10 @@ class BlockBuilder {
   void operator=(const BlockBuilder&) = delete;
 
   explicit BlockBuilder(int block_restart_interval,
-                        bool use_delta_encoding = true);
+                        bool use_delta_encoding = true,
+                        BlockBasedTableOptions::DataBlockIndexType index_type =
+                            BlockBasedTableOptions::kDataBlockBinarySearch,
+                        double data_block_hash_table_util_ratio = 0.75);
 
   // Reset the contents as if the BlockBuilder was just constructed.
   void Reset();
@@ -37,7 +42,11 @@ class BlockBuilder {
 
   // Returns an estimate of the current (uncompressed) size of the block
   // we are building.
-  inline size_t CurrentSizeEstimate() const { return estimate_; }
+  inline size_t CurrentSizeEstimate() const {
+    return estimate_ + (data_block_hash_index_builder_.Valid()
+                            ? data_block_hash_index_builder_.EstimateSize()
+                            : 0);
+  }
 
   // Returns an estimated block size after appending key and value.
   size_t EstimateSizeAfterKV(const Slice& key, const Slice& value) const;
@@ -57,6 +66,7 @@ class BlockBuilder {
   int                   counter_;   // Number of entries emitted since restart
   bool                  finished_;  // Has Finish() been called?
   std::string           last_key_;
+  DataBlockHashIndexBuilder data_block_hash_index_builder_;
 };
 
 }  // namespace rocksdb

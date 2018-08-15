@@ -35,18 +35,32 @@
 
 #include <algorithm>
 #include <assert.h>
-#include "rocksdb/comparator.h"
 #include "db/dbformat.h"
+#include "rocksdb/comparator.h"
+#include "table/data_block_footer.h"
 #include "util/coding.h"
 
 namespace rocksdb {
 
-BlockBuilder::BlockBuilder(int block_restart_interval, bool use_delta_encoding)
+BlockBuilder::BlockBuilder(
+    int block_restart_interval, bool use_delta_encoding,
+    BlockBasedTableOptions::DataBlockIndexType index_type,
+    double data_block_hash_table_util_ratio)
     : block_restart_interval_(block_restart_interval),
       use_delta_encoding_(use_delta_encoding),
       restarts_(),
       counter_(0),
       finished_(false) {
+  switch (index_type) {
+    case BlockBasedTableOptions::kDataBlockBinarySearch:
+      break;
+    case BlockBasedTableOptions::kDataBlockBinaryAndHash:
+      data_block_hash_index_builder_.Initialize(
+          data_block_hash_table_util_ratio);
+      break;
+    default:
+      assert(0);
+  }
   assert(block_restart_interval_ >= 1);
   restarts_.push_back(0);       // First restart point is at offset 0
   estimate_ = sizeof(uint32_t) + sizeof(uint32_t);
@@ -60,6 +74,9 @@ void BlockBuilder::Reset() {
   counter_ = 0;
   finished_ = false;
   last_key_.clear();
+  if (data_block_hash_index_builder_.Valid()) {
+    data_block_hash_index_builder_.Reset();
+  }
 }
 
 size_t BlockBuilder::EstimateSizeAfterKV(const Slice& key, const Slice& value)
@@ -74,6 +91,7 @@ size_t BlockBuilder::EstimateSizeAfterKV(const Slice& key, const Slice& value)
   estimate += VarintLength(key.size()); // varint for key length.
   estimate += VarintLength(value.size()); // varint for value length.
 
+  // TODO(fwu): add the delta of the DataBlockHashIndex
   return estimate;
 }
 
@@ -82,7 +100,21 @@ Slice BlockBuilder::Finish() {
   for (size_t i = 0; i < restarts_.size(); i++) {
     PutFixed32(&buffer_, restarts_[i]);
   }
-  PutFixed32(&buffer_, static_cast<uint32_t>(restarts_.size()));
+
+  uint32_t num_restarts = static_cast<uint32_t>(restarts_.size());
+  BlockBasedTableOptions::DataBlockIndexType index_type =
+    BlockBasedTableOptions::kDataBlockBinarySearch;
+  if (data_block_hash_index_builder_.Valid() &&
+      CurrentSizeEstimate() <= kMaxBlockSizeSupportedByHashIndex) {
+    data_block_hash_index_builder_.Finish(buffer_);
+    index_type = BlockBasedTableOptions::kDataBlockBinaryAndHash;
+  }
+
+  // footer is a packed format of data_block_index_type and num_restarts
+  uint32_t block_footer = PackIndexTypeAndNumRestarts(
+      index_type, num_restarts);
+
+  PutFixed32(&buffer_, block_footer);
   finished_ = true;
   return Slice(buffer_);
 }
@@ -123,6 +155,11 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   // Add string delta to buffer_ followed by value
   buffer_.append(key.data() + shared, non_shared);
   buffer_.append(value.data(), value.size());
+
+  if (data_block_hash_index_builder_.Valid()) {
+    data_block_hash_index_builder_.Add(ExtractUserKey(key),
+                                       restarts_.size() - 1);
+  }
 
   counter_++;
   estimate_ += buffer_.size() - curr_size;
