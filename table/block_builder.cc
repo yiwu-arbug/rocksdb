@@ -91,7 +91,6 @@ size_t BlockBuilder::EstimateSizeAfterKV(const Slice& key, const Slice& value)
   estimate += VarintLength(key.size()); // varint for key length.
   estimate += VarintLength(value.size()); // varint for value length.
 
-  // TODO(fwu): add the delta of the DataBlockHashIndex
   return estimate;
 }
 
