@@ -109,9 +109,6 @@ class BlobDBImpl : public BlobDB {
   // how many random access open files can we tolerate
   static constexpr uint32_t kOpenFilesTrigger = 100;
 
-  // how often to schedule reclaim open files.
-  static constexpr uint32_t kReclaimOpenFilesPeriodMillisecs = 1 * 1000;
-
   // how often to schedule delete obs files periods
   static constexpr uint32_t kDeleteObsoleteFilesPeriodMillisecs = 10 * 1000;
 
@@ -276,11 +273,6 @@ class BlobDBImpl : public BlobDB {
   // periodically check if open blob files and their TTL's has expired
   // if expired, close the sequential writer and make the file immutable
   std::pair<bool, int64_t> EvictExpiredFiles(bool aborted);
-
-  // if the number of open files, approaches ULIMIT's this
-  // task will close random readers, which are kept around for
-  // efficiency
-  std::pair<bool, int64_t> ReclaimOpenFiles(bool aborted);
 
   std::pair<bool, int64_t> RemoveTimerQ(TimerQueue* tq, bool aborted);
 

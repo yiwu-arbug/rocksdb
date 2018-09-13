@@ -200,9 +200,6 @@ Status BlobDBImpl::Open(std::vector<ColumnFamilyHandle*>* handles) {
 
 void BlobDBImpl::StartBackgroundTasks() {
   // store a call to a member function and object
-  tqueue_.add(
-      kReclaimOpenFilesPeriodMillisecs,
-      std::bind(&BlobDBImpl::ReclaimOpenFiles, this, std::placeholders::_1));
   tqueue_.add(static_cast<int64_t>(
                   bdb_options_.garbage_collection_interval_secs * 1000),
               std::bind(&BlobDBImpl::RunGC, this, std::placeholders::_1));
@@ -1348,27 +1345,6 @@ Status BlobDBImpl::SyncBlobFiles() {
                     s.ToString().c_str());
   }
   return s;
-}
-
-std::pair<bool, int64_t> BlobDBImpl::ReclaimOpenFiles(bool aborted) {
-  if (aborted) return std::make_pair(false, -1);
-
-  if (open_file_count_.load() < kOpenFilesTrigger) {
-    return std::make_pair(true, -1);
-  }
-
-  // in the future, we should sort by last_access_
-  // instead of closing every file
-  ReadLock rl(&mutex_);
-  for (auto const& ent : blob_files_) {
-    auto bfile = ent.second;
-    if (bfile->last_access_.load() == -1) continue;
-
-    WriteLock lockbfile_w(&bfile->mutex_);
-    CloseRandomAccessLocked(bfile);
-  }
-
-  return std::make_pair(true, -1);
 }
 
 // Write callback for garbage collection to check if key has been updated
