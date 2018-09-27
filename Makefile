@@ -530,6 +530,7 @@ TESTS = \
 	write_unprepared_transaction_test \
 	db_universal_compaction_test \
 	sst_file_reader_test \
+	repeatable_thread_test \
 
 PARALLEL_TEST = \
 	backupable_db_test \
@@ -1592,6 +1593,9 @@ titandb_valgrind_check: $(TITANDB_TESTS)
 			exit $$code; \
 		fi; \
 	done;
+
+repeatable_thread_test: util/repeatable_thread_test.o $(LIBOBJECTS) $(TESTHARNESS)
+	$(AM_LINK)
 
 #-------------------------------------------------
 # make install related stuff
