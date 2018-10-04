@@ -38,7 +38,6 @@ class CacheAllocator {
   }
 };
 
-#if defined(ROCKSDB_JEMALLOC) && defined(ROCKSDB_PLATFORM_POSIX)
 struct JemallocNodumpAllocatorOptions {
   // Info log logger.
   //
@@ -51,6 +50,5 @@ struct JemallocNodumpAllocatorOptions {
 extern Status NewJemallocNodumpAllocator(
     const JemallocNodumpAllocatorOptions& options,
     std::shared_ptr<CacheAllocator>* cache_allocator);
-#endif  // ROCKSDB_JEMALLOC && ROCKSDB_PLATFORM_POSIX
 
 }  // namespace rocksdb

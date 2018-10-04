@@ -17,8 +17,7 @@ namespace rocksdb {
 std::atomic<extent_alloc_t*> JemallocNodumpAllocator::original_alloc_{nullptr};
 
 JemallocNodumpAllocator::JemallocNodumpAllocator(
-    unsigned arena_index, int flags,
-    std::unique_ptr<extent_hooks_t>&& hooks,
+    unsigned arena_index, int flags, std::unique_ptr<extent_hooks_t>&& hooks,
     const std::shared_ptr<Logger>& info_log)
     : arena_index_(arena_index),
       flags_(flags),
@@ -44,7 +43,10 @@ void* JemallocNodumpAllocator::Alloc(extent_hooks_t* extent, void* new_addr,
   if (result != nullptr) {
     int ret = madvise(result, size, MADV_DONTDUMP);
     if (ret != 0) {
-      fprintf(stderr, "JemallocNodumpAllocator failed to set MADV_DONTDUMP, error code: %d", ret);
+      fprintf(
+          stderr,
+          "JemallocNodumpAllocator failed to set MADV_DONTDUMP, error code: %d",
+          ret);
       assert(false);
     }
   }
@@ -68,7 +70,6 @@ size_t JemallocNodumpAllocator::UsableSize(void* p,
 
 #endif  // ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
 
-#if defined(ROCKSDB_JEMALLOC) && defined(ROCKSDB_PLATFORM_POSIX)
 Status NewJemallocNodumpAllocator(
     const JemallocNodumpAllocatorOptions& options,
     std::shared_ptr<CacheAllocator>* cache_allocator) {
@@ -76,7 +77,8 @@ Status NewJemallocNodumpAllocator(
   (void)options;
   (void)cache_allocator;
   return Status::NotSupported(
-      "Jemalloc version < 5.x or MADV_DONTDUMP not supported.");
+      "JemallocNodumpAllocator only available with jemalloc version >= 5 "
+      "and MADV_DONTDUMP is available.");
 #else
   if (cache_allocator == nullptr) {
     return Status::InvalidArgument("cache_allocator is nullptr.");
@@ -136,6 +138,5 @@ Status NewJemallocNodumpAllocator(
   return Status::OK();
 #endif  // ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
 }
-#endif  // ROCKSDB_JEMALLOC && ROCKSDB_PLATFORM_POSIX
 
 }  // namespace rocksdb
