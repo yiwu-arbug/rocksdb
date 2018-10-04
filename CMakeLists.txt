@@ -457,6 +457,7 @@ add_subdirectory(third-party/gtest-1.7.0/fused-src/gtest)
 
 set(SOURCES
         cache/clock_cache.cc
+        cache/jemalloc_nodump_allocator.cc
         cache/lru_cache.cc
         cache/sharded_cache.cc
         db/builder.cc

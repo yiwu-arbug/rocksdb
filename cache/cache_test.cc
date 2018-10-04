@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include "cache/clock_cache.h"
+#include "cache/jemalloc_nodump_allocator.h"
 #include "cache/lru_cache.h"
 #include "util/coding.h"
 #include "util/string_util.h"
@@ -39,6 +40,7 @@ static int DecodeValue(void* v) {
 
 const std::string kLRU = "lru";
 const std::string kClock = "clock";
+const std::string kJemallocNodump = "jemalloc_nodump";
 
 void dumbDeleter(const Slice& /*key*/, void* /*value*/) {}
 
@@ -84,6 +86,17 @@ class CacheTest : public testing::TestWithParam<std::string> {
     if (type == kClock) {
       return NewClockCache(capacity);
     }
+#ifdef ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
+    if (type == kJemallocNodump) {
+      std::shared_ptr<CacheAllocator> cache_allocator;
+      auto s = NewJemallocNodumpAllocator({} /*options*/, &cache_allocator);
+      assert(s.ok());
+      LRUCacheOptions options;
+      options.capacity = capacity;
+      options.cache_allocator = std::move(cache_allocator);
+      return NewLRUCache(options);
+    }
+#endif  // ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
     return nullptr;
   }
 
@@ -687,13 +700,16 @@ TEST_P(CacheTest, DefaultShardBits) {
   ASSERT_EQ(6, sc->GetNumShardBits());
 }
 
-#ifdef SUPPORT_CLOCK_CACHE
-shared_ptr<Cache> (*new_clock_cache_func)(size_t, int, bool) = NewClockCache;
-INSTANTIATE_TEST_CASE_P(CacheTestInstance, CacheTest,
-                        testing::Values(kLRU, kClock));
-#else
 INSTANTIATE_TEST_CASE_P(CacheTestInstance, CacheTest, testing::Values(kLRU));
+
+#ifdef SUPPORT_CLOCK_CACHE
+INSTANTIATE_TEST_CASE_P(CacheTestInstance, CacheTest, testing::Values(kClock));
 #endif  // SUPPORT_CLOCK_CACHE
+
+#ifdef ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
+INSTANTIATE_TEST_CASE_P(CacheTestInstance, CacheTest,
+                        testing::Values(kJemallocNodump));
+#endif  // ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
 
 }  // namespace rocksdb
 
