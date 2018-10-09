@@ -237,5 +237,10 @@ SequenceNumber DBImpl::TEST_GetLastVisibleSequence() const {
   }
 }
 
+void DBImpl::TEST_WaitForTimedTaskRun(std::function<void()> callback) const {
+  if (thread_dump_stats_ != nullptr) {
+    thread_dump_stats_->TEST_WaitForRun(callback);
+  }
+}
 }  // namespace rocksdb
 #endif  // NDEBUG

@@ -52,6 +52,7 @@
 #include "util/autovector.h"
 #include "util/event_logger.h"
 #include "util/hash.h"
+#include "util/repeatable_thread.h"
 #include "util/stop_watch.h"
 #include "util/thread_local.h"
 
@@ -454,6 +455,7 @@ class DBImpl : public DB {
 
   int TEST_BGCompactionsAllowed() const;
   int TEST_BGFlushesAllowed() const;
+  void TEST_WaitForTimedTaskRun(std::function<void()> callback) const;
 
 #endif  // NDEBUG
 
@@ -997,10 +999,13 @@ class DBImpl : public DB {
   bool EnoughRoomForCompaction(const std::vector<CompactionInputFiles>& inputs,
                                bool* sfm_bookkeeping, LogBuffer* log_buffer);
 
+  // Schedule background tasks
+  void StartTimedTasks();
+
   void PrintStatistics();
 
   // dump rocksdb.stats to LOG
-  void MaybeDumpStats();
+  void DumpStats();
 
   // Return the minimum empty level that could hold the total data in the
   // input level. Return the input level, if such level could not be found.
@@ -1399,6 +1404,10 @@ class DBImpl : public DB {
   // Callback for when the cached_recoverable_state_ is written to memtable
   // Only to be set during initialization
   std::unique_ptr<PreReleaseCallback> recoverable_state_pre_release_callback_;
+
+  // handle for scheduling jobs at fixed intervals
+  // REQUIRES: mutex locked
+  std::unique_ptr<rocksdb::RepeatableThread> thread_dump_stats_;
 
   // No copying allowed
   DBImpl(const DBImpl&);
