@@ -77,7 +77,7 @@ Status JemallocNodumpAllocatorFactory::NewCacheAllocator(
                               ToString(ret));
   }
   assert(arena_index != 0);
-  int flags = MALLOCX_ARENA(arena_index) | MALLOCX_TCACHE_NONE;
+  int flags = MALLOCX_ARENA(arena_index);
   std::string key = "arena." + ToString(arena_index) + ".extent_hooks";
 
   // Read existing hooks.
