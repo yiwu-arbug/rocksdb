@@ -47,9 +47,13 @@ class CacheShard {
 // Keys are sharded by the highest num_shard_bits bits of hash value.
 class ShardedCache : public Cache {
  public:
-  ShardedCache(size_t capacity, int num_shard_bits, bool strict_capacity_limit,
-               std::shared_ptr<CacheAllocator> cache_allocator = nullptr);
-  virtual ~ShardedCache() = default;
+  ShardedCache(
+      size_t capacity, int num_shard_bits, bool strict_capacity_limit,
+      std::shared_ptr<CacheAllocatorFactory> cache_allocator_factory = nullptr,
+      bool shard_cache_allocator = false,
+      std::unique_ptr<CacheAllocator> cache_allocator = nullptr,
+      std::unique_ptr<CacheAllocator>* cache_allocator_shards = nullptr);
+  virtual ~ShardedCache();
   virtual const char* Name() const override = 0;
   virtual CacheShard* GetShard(int shard) = 0;
   virtual const CacheShard* GetShard(int shard) const = 0;
@@ -81,6 +85,13 @@ class ShardedCache : public Cache {
 
   int GetNumShardBits() const { return num_shard_bits_; }
 
+  static Status InitCacheAllocator(
+      CacheAllocatorFactory* cache_allocator_factory,
+      bool shard_cache_allocator, int num_shards,
+      std::unique_ptr<CacheAllocator>* cache_allocator,
+      std::unique_ptr<CacheAllocator>** cache_allocator_shards);
+  virtual CacheAllocator* GetCacheAllocator(const Slice& key) override;
+
  private:
   static inline uint32_t HashSlice(const Slice& s) {
     return Hash(s.data(), s.size(), 0);
@@ -91,11 +102,17 @@ class ShardedCache : public Cache {
     return (num_shard_bits_ > 0) ? (hash >> (32 - num_shard_bits_)) : 0;
   }
 
-  int num_shard_bits_;
+  const int num_shard_bits_;
+  // Hold a reference to the original CacheAllocatorFactory.
+  const std::shared_ptr<CacheAllocatorFactory> cache_allocator_factory_;
+  const bool shard_cache_allocator_;
+
   mutable port::Mutex capacity_mutex_;
   size_t capacity_;
   bool strict_capacity_limit_;
   std::atomic<uint64_t> last_id_;
+  std::unique_ptr<CacheAllocator> cache_allocator_ = nullptr;
+  std::unique_ptr<CacheAllocator>* cache_allocator_shards_ = nullptr;
 };
 
 extern int GetDefaultCacheShardBits(size_t capacity);

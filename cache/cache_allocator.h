@@ -7,6 +7,8 @@
 
 #include "rocksdb/cache_allocator.h"
 
+#include <memory>
+
 namespace rocksdb {
 
 struct CustomDeleter {

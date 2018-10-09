@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "util/logging.h"
 #include "util/string_util.h"
 
 namespace rocksdb {
@@ -17,12 +16,8 @@ namespace rocksdb {
 std::atomic<extent_alloc_t*> JemallocNodumpAllocator::original_alloc_{nullptr};
 
 JemallocNodumpAllocator::JemallocNodumpAllocator(
-    unsigned arena_index, int flags, std::unique_ptr<extent_hooks_t>&& hooks,
-    const std::shared_ptr<Logger>& info_log)
-    : arena_index_(arena_index),
-      flags_(flags),
-      hooks_(std::move(hooks)),
-      info_log_(info_log) {
+    unsigned arena_index, int flags, std::unique_ptr<extent_hooks_t>&& hooks)
+    : arena_index_(arena_index), flags_(flags), hooks_(std::move(hooks)) {
   assert(arena_index != 0);
 }
 
@@ -59,7 +54,7 @@ JemallocNodumpAllocator::~JemallocNodumpAllocator() {
   size_t zero = 0;
   int ret = mallctl(key.c_str(), nullptr, &zero, nullptr, 0);
   if (ret != 0) {
-    ROCKS_LOG_ERROR(info_log_, "Failed to destroy arena, error code: %d", ret);
+    fprintf(stderr, "Failed to destroy jemalloc arena, error code: %d\n", ret);
   }
 }
 
@@ -68,21 +63,9 @@ size_t JemallocNodumpAllocator::UsableSize(void* p,
   return malloc_usable_size(static_cast<void*>(p));
 }
 
-#endif  // ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
-
-Status NewJemallocNodumpAllocator(
-    const JemallocNodumpAllocatorOptions& options,
-    std::shared_ptr<CacheAllocator>* cache_allocator) {
-#ifndef ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
-  (void)options;
-  (void)cache_allocator;
-  return Status::NotSupported(
-      "JemallocNodumpAllocator only available with jemalloc version >= 5 "
-      "and MADV_DONTDUMP is available.");
-#else
-  if (cache_allocator == nullptr) {
-    return Status::InvalidArgument("cache_allocator is nullptr.");
-  }
+Status JemallocNodumpAllocatorFactory::NewCacheAllocator(
+    std::unique_ptr<CacheAllocator>* cache_allocator) {
+  assert(cache_allocator != nullptr);
 
   // Create arena.
   unsigned arena_index = 0;
@@ -90,8 +73,6 @@ Status NewJemallocNodumpAllocator(
   int ret =
       mallctl("arenas.create", &arena_index, &arena_index_size, nullptr, 0);
   if (ret != 0) {
-    ROCKS_LOG_ERROR(options.info_log,
-                    "Failed to create jemalloc arena, error code: %d", ret);
     return Status::Incomplete("Failed to create jemalloc arena, error code: " +
                               ToString(ret));
   }
@@ -106,8 +87,6 @@ Status NewJemallocNodumpAllocator(
   if (ret != 0) {
     std::string msg =
         "Failed to read existing hooks, error code: " + ToString(ret);
-    ROCKS_LOG_ERROR(options.info_log,
-                    "Failed to read existing hooks, error code: %d", ret);
     return Status::Incomplete("Failed to read existing hooks, error code: " +
                               ToString(ret));
   }
@@ -126,15 +105,30 @@ Status NewJemallocNodumpAllocator(
   extent_hooks_t* hooks_ptr = new_hooks.get();
   ret = mallctl(key.c_str(), nullptr, nullptr, &hooks_ptr, sizeof(hooks_ptr));
   if (ret != 0) {
-    ROCKS_LOG_ERROR(options.info_log,
-                    "Failed to set custom hook, error code: %d", ret);
     return Status::Incomplete("Failed to set custom hook, error code: " +
                               ToString(ret));
   }
 
   // Create cache allocator.
-  *cache_allocator = std::make_shared<JemallocNodumpAllocator>(
-      arena_index, flags, std::move(new_hooks), options.info_log);
+  cache_allocator->reset(
+      new JemallocNodumpAllocator(arena_index, flags, std::move(new_hooks)));
+  return Status::OK();
+}
+
+#endif  // ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
+
+Status NewJemallocNodumpAllocatorFactory(
+    std::shared_ptr<CacheAllocatorFactory>* cache_allocator_factory) {
+  if (cache_allocator_factory == nullptr) {
+    return Status::InvalidArgument("cache_allocator_factory must be non-null.");
+  }
+#ifndef ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
+  *cache_allocator_factory = nullptr;
+  return Status::NotSupported(
+      "JemallocNodumpAllocator only available with jemalloc version >= 5 "
+      "and MADV_DONTDUMP is available.");
+#else
+  *cache_allocator_factory = std::make_shared<JemallocNodumpAllocatorFactory>();
   return Status::OK();
 #endif  // ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
 }

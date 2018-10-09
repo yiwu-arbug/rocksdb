@@ -652,25 +652,22 @@ Status BlockBasedTableBuilder::InsertBlockInCache(const Slice& block_contents,
   Cache* block_cache_compressed = r->table_options.block_cache_compressed.get();
 
   if (type != kNoCompression && block_cache_compressed != nullptr) {
+    // make cache key by appending the file offset to the cache prefix id
+    char* end = EncodeVarint64(
+        r->compressed_cache_key_prefix + r->compressed_cache_key_prefix_size,
+        handle->offset());
+    Slice key(r->compressed_cache_key_prefix,
+              static_cast<size_t>(end - r->compressed_cache_key_prefix));
 
     size_t size = block_contents.size();
-
     auto ubuf =
-        AllocateBlock(size + 1, block_cache_compressed->cache_allocator());
+        AllocateBlock(size + 1, block_cache_compressed->GetCacheAllocator(key));
     memcpy(ubuf.get(), block_contents.data(), size);
     ubuf[size] = type;
 
     BlockContents results(std::move(ubuf), size, true, type);
 
     Block* block = new Block(std::move(results), kDisableGlobalSequenceNumber);
-
-    // make cache key by appending the file offset to the cache prefix id
-    char* end = EncodeVarint64(
-                  r->compressed_cache_key_prefix +
-                  r->compressed_cache_key_prefix_size,
-                  handle->offset());
-    Slice key(r->compressed_cache_key_prefix, static_cast<size_t>
-              (end - r->compressed_cache_key_prefix));
 
     // Insert into compressed block cache.
     block_cache_compressed->Insert(key, block, block->ApproximateMemoryUsage(),

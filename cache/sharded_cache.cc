@@ -19,14 +19,30 @@
 
 namespace rocksdb {
 
-ShardedCache::ShardedCache(size_t capacity, int num_shard_bits,
-                           bool strict_capacity_limit,
-                           std::shared_ptr<CacheAllocator> allocator)
-    : Cache(std::move(allocator)),
-      num_shard_bits_(num_shard_bits),
+ShardedCache::ShardedCache(
+    size_t capacity, int num_shard_bits, bool strict_capacity_limit,
+    std::shared_ptr<CacheAllocatorFactory> cache_allocator_factory,
+    bool shard_cache_allocator, std::unique_ptr<CacheAllocator> cache_allocator,
+    std::unique_ptr<CacheAllocator>* cache_allocator_shards)
+    : num_shard_bits_(num_shard_bits),
+      cache_allocator_factory_(std::move(cache_allocator_factory)),
+      shard_cache_allocator_(shard_cache_allocator),
       capacity_(capacity),
       strict_capacity_limit_(strict_capacity_limit),
-      last_id_(1) {}
+      last_id_(1),
+      cache_allocator_(std::move(cache_allocator)),
+      cache_allocator_shards_(cache_allocator_shards) {
+  if (cache_allocator_factory_ != nullptr && shard_cache_allocator) {
+    assert(cache_allocator_shards_ != nullptr);
+  }
+}
+
+ShardedCache::~ShardedCache() {
+  if (cache_allocator_shards_ != nullptr) {
+    assert(cache_allocator_factory_ != nullptr && shard_cache_allocator_);
+    delete[] cache_allocator_shards_;
+  }
+}
 
 void ShardedCache::SetCapacity(size_t capacity) {
   int num_shards = 1 << num_shard_bits_;
@@ -144,12 +160,57 @@ std::string ShardedCache::GetPrintableOptions() const {
              strict_capacity_limit_);
     ret.append(buffer);
   }
-  snprintf(buffer, kBufferSize, "    cache_allocator : %s\n",
-           cache_allocator() ? cache_allocator()->Name() : "None");
+  snprintf(
+      buffer, kBufferSize, "    cache_allocator_factory : %s\n",
+      cache_allocator_factory_ ? cache_allocator_factory_->Name() : "None");
+  ret.append(buffer);
+  snprintf(buffer, kBufferSize, "    shard_cache_allocator : %d\n",
+           shard_cache_allocator_);
   ret.append(buffer);
   ret.append(GetShard(0)->GetPrintableOptions());
   return ret;
 }
+
+Status ShardedCache::InitCacheAllocator(
+    CacheAllocatorFactory* cache_allocator_factory, bool shard_cache_allocator,
+    int num_shards, std::unique_ptr<CacheAllocator>* cache_allocator,
+    std::unique_ptr<CacheAllocator>** cache_allocator_shards) {
+  assert(cache_allocator != nullptr && *cache_allocator == nullptr);
+  assert(cache_allocator_shards != nullptr &&
+         *cache_allocator_shards == nullptr);
+  if (cache_allocator_factory == nullptr) {
+    return Status::OK();
+  }
+  Status s;
+  if (!shard_cache_allocator) {
+    s = cache_allocator_factory->NewCacheAllocator(cache_allocator);
+  } else {
+    *cache_allocator_shards =
+        new std::unique_ptr<CacheAllocator>[num_shards];
+    for (int i = 0; i < num_shards; i++) {
+      s = cache_allocator_factory->NewCacheAllocator(
+          &(*cache_allocator_shards)[i]);
+      if (!s.ok()) {
+        break;
+      }
+    }
+  }
+  return s;
+}
+
+CacheAllocator* ShardedCache::GetCacheAllocator(const Slice& key) {
+  if (cache_allocator_factory_ == nullptr) {
+    return nullptr;
+  }
+  if (!shard_cache_allocator_) {
+    return cache_allocator_.get();
+  } else {
+    assert(cache_allocator_shards_ != nullptr);
+    uint32_t hash = HashSlice(key);
+    return cache_allocator_shards_[Shard(hash)].get();
+  }
+}
+
 int GetDefaultCacheShardBits(size_t capacity) {
   int num_shard_bits = 0;
   size_t min_shard_size = 512L * 1024L;  // Every shard is at least 512KB.

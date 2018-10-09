@@ -278,9 +278,13 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
 
 class LRUCache : public ShardedCache {
  public:
-  LRUCache(size_t capacity, int num_shard_bits, bool strict_capacity_limit,
-           double high_pri_pool_ratio,
-           std::shared_ptr<CacheAllocator> cache_allocator = nullptr);
+  LRUCache(
+      size_t capacity, int num_shard_bits, bool strict_capacity_limit,
+      double high_pri_pool_ratio,
+      std::shared_ptr<CacheAllocatorFactory> cache_allocator_factory = nullptr,
+      bool shard_cache_allocator = false,
+      std::unique_ptr<CacheAllocator> cache_allocator = nullptr,
+      std::unique_ptr<CacheAllocator>* cache_allocator_shards = nullptr);
   virtual ~LRUCache();
   virtual const char* Name() const override { return "LRUCache"; }
   virtual CacheShard* GetShard(int shard) override;

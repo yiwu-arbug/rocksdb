@@ -24,7 +24,7 @@ class CacheAllocator {
   // Name of the cache allocator, printed in the log
   virtual const char* Name() const = 0;
 
-  // Allocate a block of at least size size. Has to be thread-safe.
+  // Allocate a block of at least size. Has to be thread-safe.
   virtual void* Allocate(size_t size) = 0;
 
   // Deallocate previously allocated block. Has to be thread-safe.
@@ -38,17 +38,19 @@ class CacheAllocator {
   }
 };
 
-struct JemallocNodumpAllocatorOptions {
-  // Info log logger.
-  //
-  // Default: nullptr (info log disabled).
-  std::shared_ptr<Logger> info_log;
+class CacheAllocatorFactory {
+ public:
+  virtual ~CacheAllocatorFactory() = default;
+
+  virtual const char* Name() const = 0;
+
+  virtual Status NewCacheAllocator(
+      std::unique_ptr<CacheAllocator>* cache_allocator) = 0;
 };
 
-// Creates a cache allocator allocates through Jemalloc and utilize
+// Generate cache allocators which allocates through Jemalloc and utilize
 // MADV_DONTDUMP through madvice to exclude cache items from core dump.
-extern Status NewJemallocNodumpAllocator(
-    const JemallocNodumpAllocatorOptions& options,
-    std::shared_ptr<CacheAllocator>* cache_allocator);
+extern Status NewJemallocNodumpAllocatorFactory(
+    std::shared_ptr<CacheAllocatorFactory>* cache_allocator_factory);
 
 }  // namespace rocksdb

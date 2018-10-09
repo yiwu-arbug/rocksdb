@@ -22,8 +22,7 @@ namespace rocksdb {
 class JemallocNodumpAllocator : public CacheAllocator {
  public:
   JemallocNodumpAllocator(unsigned arena_index, int flags,
-                          std::unique_ptr<extent_hooks_t>&& hooks,
-                          const std::shared_ptr<Logger>& info_log);
+                          std::unique_ptr<extent_hooks_t>&& hooks);
   ~JemallocNodumpAllocator();
 
   const char* Name() const override { return "JemallocNodumpAllocator"; }
@@ -32,10 +31,7 @@ class JemallocNodumpAllocator : public CacheAllocator {
   size_t UsableSize(void* p, size_t allocation_size) const override;
 
  private:
-  // Allow NewJemallocNodumpAllocator function access private members.
-  friend Status NewJemallocNodumpAllocator(
-      const JemallocNodumpAllocatorOptions& options,
-      std::shared_ptr<CacheAllocator>* cache_allocator);
+  friend class JemallocNodumpAllocatorFactory;
 
   // Custom alloc hook to replace jemalloc default alloc.
   static void* Alloc(extent_hooks_t* extent, void* new_addr, size_t size,
@@ -52,7 +48,16 @@ class JemallocNodumpAllocator : public CacheAllocator {
   unsigned arena_index_;
   int flags_;
   const std::unique_ptr<extent_hooks_t> hooks_;
-  const std::shared_ptr<Logger> info_log_;
+};
+
+class JemallocNodumpAllocatorFactory : public CacheAllocatorFactory {
+ public:
+  JemallocNodumpAllocatorFactory() = default;
+  ~JemallocNodumpAllocatorFactory() = default;
+
+  const char* Name() const override { return "JemallocNodumpAllocatorFactory"; }
+  Status NewCacheAllocator(
+      std::unique_ptr<CacheAllocator>* cache_allocator) override;
 };
 
 }  // namespace rocksdb
