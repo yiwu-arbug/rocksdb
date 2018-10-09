@@ -5,6 +5,10 @@
 
 #pragma once
 
+#include <atomic>
+
+#include "rocksdb/cache_allocator.h"
+
 #if defined(ROCKSDB_JEMALLOC) && defined(ROCKSDB_PLATFORM_POSIX)
 
 #include <jemalloc/jemalloc.h>
@@ -12,10 +16,6 @@
 
 #if (JEMALLOC_VERSION_MAJOR >= 5) && defined(MADV_DONTDUMP)
 #define ROCKSDB_JEMALLOC_NODUMP_ALLOCATOR
-
-#include <atomic>
-
-#include "rocksdb/cache_allocator.h"
 
 namespace rocksdb {
 
