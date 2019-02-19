@@ -1535,6 +1535,9 @@ range_del_aggregator_test: db/range_del_aggregator_test.o db/db_test_util.o $(LI
 blob_db_test: utilities/blob_db/blob_db_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
+sst_file_reader_test: table/sst_file_reader_test.o $(LIBOBJECTS) $(TESTHARNESS)
+	$(AM_LINK)
+
 TITANDB_TESTS = \
 	titandb_blob_file_iterator_test \
 	titandb_blob_file_size_collector_test \
