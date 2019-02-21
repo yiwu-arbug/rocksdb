@@ -395,17 +395,21 @@ void DoGenerateLevelFilesBrief(LevelFilesBrief* file_level,
     Slice largest_key = files[i]->largest.Encode();
 
     // Copy key slice to sequential memory
+    /*
     size_t smallest_size = smallest_key.size();
     size_t largest_size = largest_key.size();
     mem = arena->AllocateAligned(smallest_size + largest_size);
     memcpy(mem, smallest_key.data(), smallest_size);
     memcpy(mem + smallest_size, largest_key.data(), largest_size);
+    */
 
     FdWithKeyRange& f = file_level->files[i];
     f.fd = files[i]->fd;
     f.file_metadata = files[i];
-    f.smallest_key = Slice(mem, smallest_size);
-    f.largest_key = Slice(mem + smallest_size, largest_size);
+    f.smallest_key = smallest_key;
+    f.largest_key = largest_key;
+    // f.smallest_key = Slice(mem, smallest_size);
+    // f.largest_key = Slice(mem + smallest_size, largest_size);
   }
 }
 
