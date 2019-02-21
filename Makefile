@@ -1571,6 +1571,9 @@ range_tombstone_fragmenter_test: db/range_tombstone_fragmenter_test.o db/db_test
 sst_file_reader_test: table/sst_file_reader_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
+gen_sst: tools/gen_sst.o $(BENCHTOOLOBJECTS)
+	$(AM_LINK)
+
 #-------------------------------------------------
 # make install related stuff
 INSTALL_PATH ?= /usr/local
