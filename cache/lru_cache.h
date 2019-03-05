@@ -8,11 +8,13 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #pragma once
 
+#include <atomic>
 #include <string>
 
 #include "cache/sharded_cache.h"
 
 #include "port/port.h"
+#include "rocksdb/env.h"
 #include "util/autovector.h"
 
 namespace rocksdb {
@@ -51,8 +53,9 @@ struct LRUHandle {
   LRUHandle* prev;
   size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
-  uint32_t refs;     // a number of refs to this entry
-                     // cache itself is counted as 1
+  std::atomic<uint64_t> last_refresh_time;
+  std::atomic<uint32_t> refs{0};  // a number of refs to this entry
+                                  // cache itself is counted as 1
 
   // Include the following flags:
   //   IN_CACHE:         whether this entry is referenced by the hash table.
@@ -60,7 +63,6 @@ struct LRUHandle {
   //   IN_HIGH_PRI_POOL: whether this entry is in high-pri pool.
   //   HAS_HIT:          whether this entry has had any lookups (hits).
   enum Flags : uint8_t {
-    IN_CACHE = (1 << 0),
     IS_HIGH_PRI = (1 << 1),
     IN_HIGH_PRI_POOL = (1 << 2),
     HAS_HIT = (1 << 3),
@@ -82,18 +84,9 @@ struct LRUHandle {
     }
   }
 
-  bool InCache() const { return flags & IN_CACHE; }
   bool IsHighPri() const { return flags & IS_HIGH_PRI; }
   bool InHighPriPool() const { return flags & IN_HIGH_PRI_POOL; }
   bool HasHit() const { return flags & HAS_HIT; }
-
-  void SetInCache(bool in_cache) {
-    if (in_cache) {
-      flags |= IN_CACHE;
-    } else {
-      flags &= ~IN_CACHE;
-    }
-  }
 
   void SetPriority(Cache::Priority priority) {
     if (priority == Cache::Priority::HIGH) {
@@ -114,7 +107,6 @@ struct LRUHandle {
   void SetHit() { flags |= HAS_HIT; }
 
   void Free() {
-    assert((refs == 1 && InCache()) || (refs == 0 && !InCache()));
     if (deleter) {
       (*deleter)(key(), value);
     }
@@ -142,7 +134,6 @@ class LRUHandleTable {
       LRUHandle* h = list_[i];
       while (h != nullptr) {
         auto n = h->next_hash;
-        assert(h->InCache());
         func(h);
         h = n;
       }
@@ -221,19 +212,30 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   void LRU_Remove(LRUHandle* e);
   void LRU_Insert(LRUHandle* e);
 
+  uint32_t RefCount(uint32_t refs) { return refs >> 1; }
+  bool InCache(uint32_t refs) { return refs & 1; }
+
   // Overflow the last entry in high-pri pool to low-pri pool until size of
   // high-pri pool is no larger than the size specify by high_pri_pool_pct.
   void MaintainPoolSize();
 
+  bool Ref(LRUHandle* e);
+  bool UnsetInCache(LRUHandle* e);
+
   // Just reduce the reference count by 1.
   // Return true if last reference
   bool Unref(LRUHandle* e);
+
+  void RefreshLRU(LRUHandle* e);
 
   // Free some space following strict LRU policy until enough space
   // to hold (usage_ + charge) is freed or the lru list is empty
   // This function is not thread safe - it needs to be executed while
   // holding the mutex_
   void EvictFromLRU(size_t charge, autovector<LRUHandle*>* deleted);
+
+  Env* const env_ = Env::Default();
+  static constexpr uint64_t delay_time_us_ = 1000;
 
   // Initialized before use.
   size_t capacity_;
@@ -273,14 +275,15 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard : public CacheShard {
   LRUHandleTable table_;
 
   // Memory size for entries residing in the cache
-  size_t usage_;
+  std::atomic<size_t> usage_{0};
 
   // Memory size for entries residing only in the LRU list
-  size_t lru_usage_;
+  std::atomic<size_t> pinned_usage_{0};
 
   // mutex_ protects the following state.
   // We don't count mutex_ as the cache's internal state so semantically we
   // don't mind mutex_ invoking the non-const actions.
+  mutable port::Mutex table_mutex_;
   mutable port::Mutex mutex_;
 };
 
@@ -290,7 +293,7 @@ class LRUCache : public ShardedCache {
            double high_pri_pool_ratio,
            std::shared_ptr<MemoryAllocator> memory_allocator = nullptr);
   virtual ~LRUCache();
-  virtual const char* Name() const override { return "LRUCache"; }
+  virtual const char* Name() const override { return "ConcurrentLRUCache"; }
   virtual CacheShard* GetShard(int shard) override;
   virtual const CacheShard* GetShard(int shard) const override;
   virtual void* Value(Handle* handle) override;
