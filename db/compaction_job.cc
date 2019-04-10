@@ -954,6 +954,9 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       input_status = input->status();
       output_file_ended = true;
     }
+    std::string last_key = c_iter->key().ToString();
+    auto prefix_extractor =
+        compact_->compaction->mutable_cf_options()->prefix_extractor.get();
     c_iter->Next();
     if (!output_file_ended && c_iter->Valid() &&
         sub_compact->compaction->output_level() != 0 &&
@@ -963,6 +966,13 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       // (2) this key belongs to the next file. For historical reasons, the
       // iterator status after advancing will be given to
       // FinishCompactionOutputFile().
+      input_status = input->status();
+      output_file_ended = true;
+    }
+    // Cut by prefix extractor.
+    if (!output_file_ended && c_iter->Valid() &&
+        prefix_extractor->Transform(Slice(last_key)) !=
+            prefix_extractor->Transform(c_iter->key())) {
       input_status = input->status();
       output_file_ended = true;
     }
