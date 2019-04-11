@@ -43,6 +43,7 @@
 #include "port/port.h"
 #include "port/stack_trace.h"
 #include "rocksdb/cache.h"
+#include "rocksdb/convenience.h"
 #include "rocksdb/db.h"
 #include "rocksdb/env.h"
 #include "rocksdb/filter_policy.h"
@@ -123,7 +124,8 @@ DEFINE_string(
     "fillseekseq,"
     "randomtransaction,"
     "randomreplacekeys,"
-    "timeseries",
+    "timeseries,"
+    "trydelfilesinrange",
 
     "Comma-separated list of operations to run in the specified"
     " order. Available benchmarks:\n"
@@ -2820,6 +2822,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
           exit(1);
         }
         method = &Benchmark::Replay;
+      } else if (name == "trydelfilesinrange") {
+        method = &Benchmark::TryDeleteFilesInRange;
       } else if (!name.empty()) {  // No error message for empty name
         fprintf(stderr, "unknown benchmark '%s'\n", name.c_str());
         exit(1);
@@ -6091,6 +6095,26 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     } else {
       fprintf(stderr, "Starting replay failed. Error: %s\n",
               s.ToString().c_str());
+    }
+  }
+
+  void TryDeleteFilesInRange(ThreadState* thread) {
+    if (thread->tid != 0) {
+      return;
+    }
+    DB* db = db_.db;
+    int64_t num_prefix = FLAGS_num / keys_per_prefix_;
+    for (int64_t i = 0; i < num_prefix; i++) {
+      int64_t next = i + 1;
+      char start[8];
+      char end[8];
+      memcpy(start, static_cast<void*>(&i), 8);
+      memcpy(end, static_cast<void*>(&next), 8);
+      Slice start_slice(start, 8);
+      Slice end_slice(end, 8);
+      Status s = DeleteFilesInRange(db, db->DefaultColumnFamily(), &start_slice,
+                                    &end_slice, false /*include_end*/);
+      printf("status: %s\n", s.ToString().c_str());
     }
   }
 };
