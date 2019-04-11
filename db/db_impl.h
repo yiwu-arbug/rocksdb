@@ -393,6 +393,11 @@ class DBImpl : public DB {
     return &logs_with_prep_tracker_;
   }
 
+  // Wait for any compaction
+  // We add a bool parameter to wait for unscheduledCompactions_ == 0, but this
+  // is only for the special test of CancelledCompactions
+  Status TEST_WaitForCompact(bool waitUnscheduled = false);
+
 #ifndef NDEBUG
   // Extra methods (for testing) that are not in the public DB interface
   // Implemented in db_impl_debug.cc
@@ -418,11 +423,6 @@ class DBImpl : public DB {
 
   // Wait for memtable compaction
   Status TEST_WaitForFlushMemTable(ColumnFamilyHandle* column_family = nullptr);
-
-  // Wait for any compaction
-  // We add a bool parameter to wait for unscheduledCompactions_ == 0, but this
-  // is only for the special test of CancelledCompactions
-  Status TEST_WaitForCompact(bool waitUnscheduled = false);
 
   // Return the maximum overlapping data (in bytes) at next level for any
   // file at a level >= 1.

@@ -2771,6 +2771,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
         method = &Benchmark::Compact;
       } else if (name == "compactall") {
         CompactAll();
+      } else if (name == "wait") {
+        method = &Benchmark::WaitForCompact;
       } else if (name == "crc32c") {
         method = &Benchmark::Crc32c;
       } else if (name == "xxhash") {
@@ -6009,6 +6011,11 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       thread->stats.Stop();
       thread->stats.Report("timeseries write");
     }
+  }
+
+  void WaitForCompact(ThreadState* thread) {
+    DBImpl* db_impl = reinterpret_cast<DBImpl*>(SelectDB(thread));
+    db_impl->TEST_WaitForCompact(true /*wait_unscheduled*/);
   }
 
   void Compact(ThreadState* thread) {
