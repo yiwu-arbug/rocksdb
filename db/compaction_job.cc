@@ -948,15 +948,28 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     // and 0.6MB instead of 1MB and 0.2MB)
     bool output_file_ended = false;
     Status input_status;
-    if (sub_compact->compaction->output_level() != 0 &&
-        sub_compact->current_output_file_size >=
-            sub_compact->compaction->max_output_file_size()) {
-      // (1) this key terminates the file. For historical reasons, the iterator
-      // status before advancing will be given to FinishCompactionOutputFile().
-      input_status = input->status();
-      output_file_ended = true;
-    }
+    std::string current_key = c_iter->key().ToString();
     c_iter->Next();
+    int num_levels = compact_->compaction->immutable_cf_options()->num_levels;
+    if (sub_compact->compaction->output_level() >= num_levels - 2) {
+      auto p =
+          compact_->compaction->mutable_cf_options()->prefix_extractor.get();
+      if (c_iter->Valid() &&
+          p->Transform(Slice(current_key)) != p->Transform(c_iter->key())) {
+        input_status = input->status();
+        output_file_ended = true;
+      }
+    } else {
+      if (sub_compact->compaction->output_level() != 0 &&
+          sub_compact->current_output_file_size >=
+              sub_compact->compaction->max_output_file_size()) {
+        // (1) this key terminates the file. For historical reasons, the
+        // iterator status before advancing will be given to
+        // FinishCompactionOutputFile().
+        input_status = input->status();
+        output_file_ended = true;
+      }
+    }
     if (!output_file_ended && c_iter->Valid() &&
         sub_compact->compaction->output_level() != 0 &&
         sub_compact->ShouldStopBefore(c_iter->key(),
