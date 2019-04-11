@@ -3738,4 +3738,21 @@ Status DBImpl::ReserveFileNumbersBeforeIngestion(
 }
 #endif  // ROCKSDB_LITE
 
+Status DBImpl::TEST_WaitForCompact(bool wait_unscheduled) {
+  // Wait until the compaction completes
+
+  // TODO: a bug here. This function actually does not necessarily
+  // wait for compact. It actually waits for scheduled compaction
+  // OR flush to finish.
+
+  InstrumentedMutexLock l(&mutex_);
+  while ((bg_bottom_compaction_scheduled_ || bg_compaction_scheduled_ ||
+          bg_flush_scheduled_ ||
+          (wait_unscheduled && unscheduled_compactions_)) &&
+         (error_handler_.GetBGError() == Status::OK())) {
+    bg_cv_.Wait();
+  }
+  return error_handler_.GetBGError();
+}
+
 }  // namespace rocksdb
