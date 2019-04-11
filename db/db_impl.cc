@@ -2712,13 +2712,19 @@ Status DBImpl::DeleteFilesInRanges(ColumnFamilyHandle* column_family,
       return Status::OK();
     }
     input_version->Ref();
+    for (auto* f : deleted_files) {
+      printf("file %lu, size %lu\n", f->fd.GetNumber(), f->fd.GetFileSize());
+    }
+    /*
     status = versions_->LogAndApply(cfd, *cfd->GetLatestMutableCFOptions(),
                                     &edit, &mutex_, directories_.GetDbDir());
+
     if (status.ok()) {
       InstallSuperVersionAndScheduleWork(cfd,
                                          &job_context.superversion_contexts[0],
                                          *cfd->GetLatestMutableCFOptions());
     }
+    */
     for (auto* deleted_file : deleted_files) {
       deleted_file->being_compacted = false;
     }
