@@ -43,6 +43,7 @@
 #include "port/port.h"
 #include "port/stack_trace.h"
 #include "rocksdb/cache.h"
+#include "rocksdb/compaction_policy.h"
 #include "rocksdb/db.h"
 #include "rocksdb/env.h"
 #include "rocksdb/filter_policy.h"
@@ -1202,6 +1203,33 @@ static const bool FLAGS_table_cache_numshardbits_dummy __attribute__((__unused__
                           &ValidateTableCacheNumshardbits);
 
 namespace rocksdb {
+
+class TestCompactionPolicy : public CompactionPolicy {
+ public:
+  void Add(const Slice& key, const Slice& /*value*/) override {
+    current_prefix_ = Slice(key.data(), 8).ToString();
+  }
+
+  bool ShouldEndCurrentOutputFile(const CompactionOutputInfo& info) override {
+    Slice prefix(info.next_key.data(), 8);
+    return prefix != Slice(current_prefix_);
+  }
+
+ private:
+  std::string current_prefix_;
+};
+
+class TestCompactionPolicyFactory : public CompactionPolicyFactory {
+  const char* Name() const override { return "TestCompactionPolicyFactory"; }
+
+  std::unique_ptr<CompactionPolicy> NewCompactionPolicy(
+      const CompactionInfo& info) override {
+    if (info.output_level != 6) {
+      return nullptr;
+    }
+    return std::unique_ptr<CompactionPolicy>(new TestCompactionPolicy());
+  }
+};
 
 namespace {
 struct ReportFileOpCounters {
@@ -3718,6 +3746,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       delete iter;
       FLAGS_num = keys_.size();
     }
+
+    options.compaction_policy_factory.reset(new TestCompactionPolicyFactory());
   }
 
   void Open(Options* opts) {
