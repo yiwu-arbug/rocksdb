@@ -905,7 +905,30 @@ class LevelIterator final : public InternalIterator {
 
   inline bool MayBeOutOfLowerBound() override {
     assert(Valid());
+    assert(file_iter_.MayBeOutOfLowerBound());
+    assert(read_options_.iterate_lower_bound != nullptr);
+    if (!may_be_out_of_lower_bound_ &&
+        iterate_lb_ != read_options_.iterate_lower_bound->ToString()) {
+      assert(iterate_lb_.size() > 0);
+      assert(read_options_.iterate_lower_bound->size() > 0);
+    }
+    assert(may_be_out_of_lower_bound_ ||
+           file_iter_copy_ == static_cast<void*>(file_iter_.iter()));
+    assert(may_be_out_of_lower_bound_ ||
+           iterate_lb_ptr_ == read_options_.iterate_lower_bound);
+    assert(may_be_out_of_lower_bound_ ||
+           iterate_lb_ == read_options_.iterate_lower_bound->ToString());
+    assert(may_be_out_of_lower_bound_ ||
+           user_comparator_.Compare(ExtractUserKey(file_smallest_key(file_index_)),
+                                    *read_options_.iterate_lower_bound) >= 0);
+    assert(may_be_out_of_lower_bound_ ||
+           user_comparator_.Compare(ExtractUserKey(key()),
+                                    *read_options_.iterate_lower_bound) >= 0);
+    return true;
+    /*
+    assert(Valid());
     return may_be_out_of_lower_bound_ && file_iter_.MayBeOutOfLowerBound();
+    */
   }
 
   inline bool MayBeOutOfUpperBound() override {
@@ -972,12 +995,16 @@ class LevelIterator final : public InternalIterator {
         read_options_.iterate_lower_bound != nullptr &&
         user_comparator_.Compare(ExtractUserKey(file_smallest_key(file_index_)),
                                  *read_options_.iterate_lower_bound) < 0;
-    return table_cache_->NewIterator(
+    iterate_lb_ = read_options_.iterate_lower_bound->ToString();
+    iterate_lb_ptr_ = read_options_.iterate_lower_bound;
+    auto* ret =  table_cache_->NewIterator(
         read_options_, env_options_, icomparator_, *file_meta.file_metadata,
         range_del_agg_, prefix_extractor_,
         nullptr /* don't need reference to table */, file_read_hist_,
         for_compaction_, nullptr /* arena */, skip_filters_, level_,
         smallest_compaction_key, largest_compaction_key);
+    file_iter_copy_ = static_cast<void*>(ret);
+    return ret;
   }
 
   TableCache* table_cache_;
@@ -994,6 +1021,9 @@ class LevelIterator final : public InternalIterator {
   bool for_compaction_;
   bool skip_filters_;
   bool may_be_out_of_lower_bound_ = true;
+  void* file_iter_copy_ = nullptr;
+  std::string iterate_lb_;
+  const Slice* iterate_lb_ptr_ = nullptr;
   size_t file_index_;
   int level_;
   RangeDelAggregator* range_del_agg_;
