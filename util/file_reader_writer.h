@@ -282,7 +282,11 @@ class WritableFileWriter {
 
   Status Close();
 
-  Status Sync(bool use_fsync);
+  Status Sync(bool use_fsync, bool async = false);
+
+  Status AsyncSync();
+
+  Status WaitAsync();
 
   // Sync only the data that was already Flush()ed. Safe to call concurrently
   // with Append() and Flush(). If !writable_file_->IsSyncThreadSafe(),
@@ -310,7 +314,7 @@ class WritableFileWriter {
   // Normal write
   Status WriteBuffered(const char* data, size_t size);
   Status RangeSync(uint64_t offset, uint64_t nbytes);
-  Status SyncInternal(bool use_fsync);
+  Status SyncInternal(bool use_fsync, bool async = false);
 };
 
 // FilePrefetchBuffer is a smart buffer to store and read data from a file.

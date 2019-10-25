@@ -753,6 +753,9 @@ class WritableFile {
   virtual Status Flush() = 0;
   virtual Status Sync() = 0;  // sync data
 
+  virtual Status AsyncSync() {}
+  virtual Status WaitAsync() {}
+
   /*
    * Sync data and/or metadata as well.
    * By default, sync only data.

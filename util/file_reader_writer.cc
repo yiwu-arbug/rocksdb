@@ -427,14 +427,14 @@ Status WritableFileWriter::Flush() {
   return s;
 }
 
-Status WritableFileWriter::Sync(bool use_fsync) {
+Status WritableFileWriter::Sync(bool use_fsync, bool async) {
   Status s = Flush();
   if (!s.ok()) {
     return s;
   }
   TEST_KILL_RANDOM("WritableFileWriter::Sync:0", rocksdb_kill_odds);
   if (!use_direct_io() && pending_sync_) {
-    s = SyncInternal(use_fsync);
+    s = SyncInternal(use_fsync, async);
     if (!s.ok()) {
       return s;
     }
@@ -456,7 +456,7 @@ Status WritableFileWriter::SyncWithoutFlush(bool use_fsync) {
   return s;
 }
 
-Status WritableFileWriter::SyncInternal(bool use_fsync) {
+Status WritableFileWriter::SyncInternal(bool use_fsync, bool async) {
   Status s;
   IOSTATS_TIMER_GUARD(fsync_nanos);
   TEST_SYNC_POINT("WritableFileWriter::SyncInternal:0");
@@ -464,11 +464,17 @@ Status WritableFileWriter::SyncInternal(bool use_fsync) {
   IOSTATS_CPU_TIMER_GUARD(cpu_write_nanos, env_);
   if (use_fsync) {
     s = writable_file_->Fsync();
-  } else {
+  } else if (!async) {
     s = writable_file_->Sync();
+  } else {
+    s = writable_file_->AsyncSync();
   }
   SetPerfLevel(prev_perf_level);
   return s;
+}
+
+Status WritableFileWriter::WaitAsync() {
+  return writable_file_->WaitAsync();
 }
 
 Status WritableFileWriter::RangeSync(uint64_t offset, uint64_t nbytes) {

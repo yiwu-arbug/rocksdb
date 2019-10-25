@@ -161,6 +161,7 @@ class PosixWritableFile : public WritableFile {
   // support it, so we need to do a dynamic check too.
   bool sync_file_range_supported_;
 #endif  // ROCKSDB_RANGESYNC_PRESENT
+  struct io_uring uring_;
 
  public:
   explicit PosixWritableFile(const std::string& fname, int fd,
@@ -175,6 +176,10 @@ class PosixWritableFile : public WritableFile {
   virtual Status PositionedAppend(const Slice& data, uint64_t offset) override;
   virtual Status Flush() override;
   virtual Status Sync() override;
+
+  virtual Status AsyncSync() override;
+  virtual Status WaitAsync() override;
+
   virtual Status Fsync() override;
   virtual bool IsSyncThreadSafe() const override;
   virtual bool use_direct_io() const override { return use_direct_io_; }

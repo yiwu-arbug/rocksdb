@@ -954,12 +954,14 @@ PosixWritableFile::PosixWritableFile(const std::string& fname, int fd,
   sync_file_range_supported_ = IsSyncFileRangeSupported(fd_);
 #endif  // ROCKSDB_RANGESYNC_PRESENT
   assert(!options.use_mmap_writes);
+  io_uring_queue_init(&uring_);
 }
 
 PosixWritableFile::~PosixWritableFile() {
   if (fd_ >= 0) {
     PosixWritableFile::Close();
   }
+  io_uring_queue_exit(&uring_);
 }
 
 Status PosixWritableFile::Append(const Slice& data) {
@@ -1068,6 +1070,29 @@ Status PosixWritableFile::Sync() {
   if (fdatasync(fd_) < 0) {
     return IOError("While fdatasync", filename_, errno);
   }
+  return Status::OK();
+}
+
+Status PosixWritableFile::AsyncSync() {
+  struct io_uring_sqe* sqe = io_uring_get_sqe(&uring_);
+  if (sqe == nullptr) {
+    return Status::IOError("sync: get sqe");
+  }
+  io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
+  int ret = io_uring_submit(&uring_);
+  if (ret <= 0) {
+    return Status::IOError("sync: submit");
+  }
+  return Status::OK();
+}
+
+Status PosixWritableFile::WaitAsync() {
+  struct io_uring_cqe* cqe;
+  int ret = io_uring_wait_cqe(&uring_, &cqe);
+  if (ret < 0) {
+    return Status::IOError("wait: get cqe");
+  }
+  io_uring_cqe_seen(&uring_, cqe);
   return Status::OK();
 }
 
