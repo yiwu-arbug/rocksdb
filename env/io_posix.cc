@@ -954,7 +954,7 @@ PosixWritableFile::PosixWritableFile(const std::string& fname, int fd,
   sync_file_range_supported_ = IsSyncFileRangeSupported(fd_);
 #endif  // ROCKSDB_RANGESYNC_PRESENT
   assert(!options.use_mmap_writes);
-  io_uring_queue_init(&uring_);
+  io_uring_queue_init(kIoUringDepth, &uring_, 0);
 }
 
 PosixWritableFile::~PosixWritableFile() {
