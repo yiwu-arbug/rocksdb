@@ -409,6 +409,12 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
 
   if (need_log_sync) {
     mutex_.Lock();
+    for (auto& log : logs_) {
+      status = log.writer->file()->WaitAsync();
+      if (!status.ok()) {
+        break;
+      }
+    }
     MarkLogsSynced(logfile_number_, need_log_dir_sync, status);
     mutex_.Unlock();
     // Requesting sync with two_write_queues_ is expected to be very rare. We
@@ -429,12 +435,6 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     should_exit_batch_group = write_thread_.CompleteParallelMemTableWriter(&w);
   }
   if (should_exit_batch_group) {
-    for (auto& log : logs_) {
-      status = log.writer->file()->WaitAsync();
-      if (!status.ok()) {
-        break;
-      }
-    }
     if (status.ok()) {
       // Note: if we are to resume after non-OK statuses we need to revisit how
       // we reacts to non-OK statuses here.

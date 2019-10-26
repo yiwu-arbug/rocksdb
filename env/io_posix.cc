@@ -981,6 +981,23 @@ Status PosixWritableFile::Append(const Slice& data) {
 }
 
 Status PosixWritableFile::WaitQueue(int max_len) {
+  if (uring_queue_len_ <= max_len) {
+    return Status::OK();
+  }
+  /*
+  struct io_uring_cqe* cqes[100];
+  unsigned got = io_uring_peek_batch_cqe(&uring_, cqes, 100);
+  if (got > 0) {
+    for (unsigned i = 0; i < got; i++) {
+      if (cqes[i]->user_data != 0) {
+        void* buf = reinterpret_cast<void*>(cqes[i]->user_data);
+        free(buf);
+      }
+      io_uring_cqe_seen(&uring_, cqes[i]);
+    }
+    uring_queue_len_ -= static_cast<int>(got);
+  }
+  */
   while (uring_queue_len_ > max_len) {
     struct io_uring_cqe* cqe;
     int ret = io_uring_wait_cqe(&uring_, &cqe);
@@ -1021,7 +1038,7 @@ Status PosixWritableFile::AsyncAppend(const Slice& data) {
   iov[0].iov_len = data.size();
   io_uring_prep_writev(sqe, fd_, iov, 1, filesize_);
   sqe->user_data = reinterpret_cast<uint64_t>(buffer);
-  io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
+  io_uring_sqe_set_flags(sqe, IOSQE_IO_LINK);
   int ret = io_uring_submit(&uring_);
   if (ret <= 0) {
     return Status::IOError("async append: submit");
@@ -1137,7 +1154,7 @@ Status PosixWritableFile::AsyncSync() {
   }
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
   sqe->user_data = 0;
-  io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
+  io_uring_sqe_set_flags(sqe, IOSQE_IO_LINK);
   int ret = io_uring_submit(&uring_);
   if (ret <= 0) {
     return Status::IOError("sync: submit");
