@@ -162,6 +162,7 @@ class PosixWritableFile : public WritableFile {
   bool sync_file_range_supported_;
 #endif  // ROCKSDB_RANGESYNC_PRESENT
   struct io_uring uring_;
+  int uring_queue_len_ = 0;
 
  public:
   explicit PosixWritableFile(const std::string& fname, int fd,
@@ -177,6 +178,8 @@ class PosixWritableFile : public WritableFile {
   virtual Status Flush() override;
   virtual Status Sync() override;
 
+  Status WaitQueue(int max_len);
+  virtual Status AsyncAppend() override;
   virtual Status AsyncSync() override;
   virtual Status WaitAsync() override;
 
