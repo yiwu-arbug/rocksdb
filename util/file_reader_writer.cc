@@ -305,7 +305,7 @@ Status WritableFileWriter::Append(const Slice& data, bool async) {
   return s;
 }
 
-Status WritableFileWriter::Pad(const size_t pad_bytes) {
+Status WritableFileWriter::Pad(const size_t pad_bytes, bool async) {
   assert(pad_bytes < kDefaultPageSize);
   size_t left = pad_bytes;
   size_t cap = buf_.Capacity() - buf_.CurrentSize();
@@ -318,7 +318,7 @@ Status WritableFileWriter::Pad(const size_t pad_bytes) {
     buf_.PadWith(append_bytes, 0);
     left -= append_bytes;
     if (left > 0) {
-      Status s = Flush();
+      Status s = Flush(async);
       if (!s.ok()) {
         return s;
       }
@@ -428,7 +428,7 @@ Status WritableFileWriter::Flush(bool async) {
 }
 
 Status WritableFileWriter::Sync(bool use_fsync, bool async) {
-  Status s = Flush();
+  Status s = Flush(async);
   if (!s.ok()) {
     return s;
   }

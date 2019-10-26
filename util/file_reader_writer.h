@@ -276,7 +276,7 @@ class WritableFileWriter {
 
   Status Append(const Slice& data, bool async = false);
 
-  Status Pad(const size_t pad_bytes);
+  Status Pad(const size_t pad_bytes, bool async = false);
 
   Status Flush(bool async = false);
 
