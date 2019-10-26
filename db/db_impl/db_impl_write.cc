@@ -429,6 +429,12 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     should_exit_batch_group = write_thread_.CompleteParallelMemTableWriter(&w);
   }
   if (should_exit_batch_group) {
+    for (auto& log : logs_) {
+      status = log.writer->file()->WaitAsync();
+      if (!status.ok()) {
+        break;
+      }
+    }
     if (status.ok()) {
       // Note: if we are to resume after non-OK statuses we need to revisit how
       // we reacts to non-OK statuses here.
@@ -1016,7 +1022,7 @@ Status DBImpl::WriteToWAL(const WriteThread::WriteGroup& write_group,
     //  - as long as other threads don't modify it, it's safe to read
     //    from std::deque from multiple threads concurrently.
     for (auto& log : logs_) {
-      status = log.writer->file()->Sync(immutable_db_options_.use_fsync);
+      status = log.writer->file()->Sync(immutable_db_options_.use_fsync, true/*async*/);
       if (!status.ok()) {
         break;
       }
