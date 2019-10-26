@@ -992,6 +992,7 @@ Status PosixWritableFile::WaitQueue(int max_len) {
         void* buf = reinterpret_cast<void*>(cqes[i]->user_data);
         free(buf);
       }
+      io_uring_cqe_seen(&uring_, cqes[i]);
     }
     uring_queue_len_ -= static_cast<int>(got);
   }
