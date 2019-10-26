@@ -1002,6 +1002,8 @@ Status PosixWritableFile::AsyncAppend(const Slice& data) {
     assert(IsSectorAligned(data.size(), GetRequiredBufferAlignment()));
     assert(IsSectorAligned(data.data(), GetRequiredBufferAlignment()));
   }
+  // const char* src = data.data();
+  size_t nbytes = data.size();
 
   Status s = WaitQueue(200);
   if (!s.ok()) {
