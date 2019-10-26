@@ -984,8 +984,8 @@ Status PosixWritableFile::WaitQueue(int max_len) {
   if (uring_queue_len_ <= max_len) {
     return Status::OK();
   }
-  struct io_uring_cqe* cqes[max_len];
-  unsigned got = io_uring_peek_batch_cqe(&uring_, cqes, max_len);
+  struct io_uring_cqe* cqes[100];
+  unsigned got = io_uring_peek_batch_cqe(&uring_, cqes, 100);
   if (got > 0) {
     for (unsigned i = 0; i < got; i++) {
       if (cqes[i]->user_data != 0) {
