@@ -980,6 +980,59 @@ Status PosixWritableFile::Append(const Slice& data) {
   return Status::OK();
 }
 
+Status PosixWritableFile::WaitQueue(int max_len) {
+  while (uring_queue_len_ > max_len) {
+    struct io_uring_cqe* cqe;
+    int ret = io_uring_wait_cqe(&uring_, &cqe);
+    if (ret < 0) {
+      return Status::IOError("async append: wait cqe");
+    }
+    if (cqe->user_data != 0) {
+      void* buffer = reinterpret_cast<void*>(cqe->user_data);
+      free(buffer);
+    }
+    io_uring_cqe_seen(&uring_, cqe);
+    uring_queue_len_--;
+  }
+  return Status::OK();
+}
+
+Status PosixWritableFile::AsyncAppend(const Slice& data) {
+  if (use_direct_io()) {
+    assert(IsSectorAligned(data.size(), GetRequiredBufferAlignment()));
+    assert(IsSectorAligned(data.data(), GetRequiredBufferAlignment()));
+  }
+  // const char* src = data.data();
+  size_t nbytes = data.size();
+
+  Status s = WaitQueue(200);
+  if (!s.ok()) {
+    return s;
+  }
+
+  struct io_uring_sqe* sqe = io_uring_get_sqe(&uring_);
+  if (sqe == nullptr) {
+    return Status::IOError("async append: get sqe");
+  }
+  void* buffer = malloc(data.size());
+  memcpy(buffer, data.data(), data.size());
+  struct iovec iov[1];
+  iov[0].iov_base = buffer;
+  iov[0].iov_len = data.size();
+  io_uring_prep_writev(sqe, fd_, iov, 1, filesize_);
+  sqe->user_data = reinterpret_cast<uint64_t>(buffer);
+  io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
+  int ret = io_uring_submit(&uring_);
+  if (ret <= 0) {
+    return Status::IOError("async append: submit");
+  }
+  uring_queue_len_++;
+
+  filesize_ += nbytes;
+  return Status::OK();
+}
+
+
 Status PosixWritableFile::PositionedAppend(const Slice& data, uint64_t offset) {
   if (use_direct_io()) {
     assert(IsSectorAligned(offset, GetRequiredBufferAlignment()));
@@ -1074,26 +1127,27 @@ Status PosixWritableFile::Sync() {
 }
 
 Status PosixWritableFile::AsyncSync() {
+  Status s = WaitQueue(200);
+  if (!s.ok()) {
+    return s;
+  }
   struct io_uring_sqe* sqe = io_uring_get_sqe(&uring_);
   if (sqe == nullptr) {
     return Status::IOError("sync: get sqe");
   }
   io_uring_prep_fsync(sqe, fd_, IORING_FSYNC_DATASYNC);
+  sqe->user_data = 0;
+  io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
   int ret = io_uring_submit(&uring_);
   if (ret <= 0) {
     return Status::IOError("sync: submit");
   }
+  uring_queue_len_++;
   return Status::OK();
 }
 
 Status PosixWritableFile::WaitAsync() {
-  struct io_uring_cqe* cqe;
-  int ret = io_uring_wait_cqe(&uring_, &cqe);
-  if (ret < 0) {
-    return Status::IOError("wait: get cqe");
-  }
-  io_uring_cqe_seen(&uring_, cqe);
-  return Status::OK();
+  return WaitQueue(0);
 }
 
 Status PosixWritableFile::Fsync() {
