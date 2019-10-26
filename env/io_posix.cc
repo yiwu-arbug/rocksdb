@@ -983,12 +983,12 @@ Status PosixWritableFile::Append(const Slice& data) {
 Status PosixWritableFile::WaitQueue(int max_len) {
   while (uring_queue_len_ > max_len) {
     struct io_uring_cqe* cqe;
-    int ret = io_uring_wait_cqe(&ring_, &cqe);
+    int ret = io_uring_wait_cqe(&uring_, &cqe);
     if (ret < 0) {
       return Status::IOError("async append: wait cqe");
     }
     if (cqe->user_data != 0) {
-      void* buffer = reinterpret_cast<void*>(cqe.user_data);
+      void* buffer = reinterpret_cast<void*>(cqe->user_data);
       free(buffer);
     }
     io_uring_cqe_seen(&uring_, cqe);
@@ -1002,8 +1002,6 @@ Status PosixWritableFile::AsyncAppend(const Slice& data) {
     assert(IsSectorAligned(data.size(), GetRequiredBufferAlignment()));
     assert(IsSectorAligned(data.data(), GetRequiredBufferAlignment()));
   }
-  const char* src = data.data();
-  size_t nbytes = data.size();
 
   Status s = WaitQueue(200);
   if (!s.ok()) {
@@ -1019,7 +1017,7 @@ Status PosixWritableFile::AsyncAppend(const Slice& data) {
   struct iovec iov[1];
   iov[0].iov_base = buffer;
   iov[0].iov_len = data.size();
-  io_uring_prep_writev(sqe, fd_, &iov, 1, filesize_);
+  io_uring_prep_writev(sqe, fd_, iov, 1, filesize_);
   sqe->user_data = reinterpret_cast<uint64_t>(buffer);
   io_uring_sqe_set_flags(sqe, IOSQE_IO_DRAIN);
   int ret = io_uring_submit(&uring_);
