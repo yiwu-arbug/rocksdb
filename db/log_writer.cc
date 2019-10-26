@@ -70,7 +70,7 @@ Status Writer::AddRecord(const Slice& slice) {
         // Fill the trailer (literal below relies on kHeaderSize and
         // kRecyclableHeaderSize being <= 11)
         assert(header_size <= 11);
-        s = dest_->Append(Slice("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+        s = dest_->AsyncAppend(Slice("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
                                 static_cast<size_t>(leftover)));
         if (!s.ok()) {
           break;
@@ -105,7 +105,7 @@ Status Writer::AddRecord(const Slice& slice) {
 
   if (s.ok()) {
     if (!manual_flush_) {
-      s = dest_->Flush();
+      s = dest_->Flush(true/*async*/);
     }
   }
 
@@ -150,9 +150,9 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr, size_t n) {
   EncodeFixed32(buf, crc);
 
   // Write the header and the payload
-  Status s = dest_->Append(Slice(buf, header_size));
+  Status s = dest_->AsyncAppend(Slice(buf, header_size));
   if (s.ok()) {
-    s = dest_->Append(Slice(ptr, n));
+    s = dest_->AsyncAppend(Slice(ptr, n));
   }
   block_offset_ += header_size + n;
   return s;
