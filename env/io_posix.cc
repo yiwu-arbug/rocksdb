@@ -1263,7 +1263,7 @@ Status PosixWritableFile::Allocate(uint64_t offset, uint64_t len) {
 #endif
 
 Status PosixWritableFile::RangeSync(uint64_t offset, uint64_t nbytes) {
-  return AsyncRangeSync();
+  return AsyncRangeSync(offset, nbytes);
   /*
 #ifdef ROCKSDB_RANGESYNC_PRESENT
   assert(offset <= static_cast<uint64_t>(std::numeric_limits<off_t>::max()));
