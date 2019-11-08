@@ -50,6 +50,7 @@
 #include "rocksdb/slice.h"
 #include "rocksdb/slice_transform.h"
 #include "rocksdb/stats_history.h"
+#include "rocksdb/table_properties.h"
 #include "rocksdb/utilities/object_registry.h"
 #include "rocksdb/utilities/optimistic_transaction_db.h"
 #include "rocksdb/utilities/options_util.h"
@@ -60,6 +61,7 @@
 #include "test_util/testutil.h"
 #include "test_util/transaction_test_util.h"
 #include "util/cast_util.h"
+#include "util/coding.h"
 #include "util/compression.h"
 #include "util/crc32c.h"
 #include "util/gflags_compat.h"
@@ -1278,6 +1280,42 @@ static const bool FLAGS_table_cache_numshardbits_dummy __attribute__((__unused__
 namespace rocksdb {
 
 namespace {
+
+struct TestPropCollector : public TablePropertiesCollector {
+  const char* Name() const override {
+    return "TestPropCollector";
+  }
+
+  Status AddUserKey(const Slice&, const Slice&, EntryType, SequenceNumber, uint64_t) override {
+    return Status::OK();
+  }
+
+  Status Finish(UserCollectedProperties* prop) override {
+    Random rnd(301);
+    std::string buf;
+    for (int i = 0; i < 4096; i++) {
+      PutFixed32(&buf, rnd.Next());
+    }
+    prop->emplace(std::make_pair<std::string, std::string>("test_prop", std::move(buf)));
+    return Status::OK();
+  }
+
+  UserCollectedProperties GetReadableProperties() const override {
+    return UserCollectedProperties();
+  }
+};
+
+struct TestPropCollectorFactory : public TablePropertiesCollectorFactory {
+  const char* Name() const override {
+    return "TestPropCollectorFactory";
+  }
+
+  TablePropertiesCollector* CreateTablePropertiesCollector(
+      TablePropertiesCollectorFactory::Context) override {
+    return new TestPropCollector;
+  }
+};
+
 struct ReportFileOpCounters {
   std::atomic<int> open_counter_;
   std::atomic<int> read_counter_;
@@ -2935,6 +2973,10 @@ class Benchmark {
         method = &Benchmark::Replay;
       } else if (name == "getmergeoperands") {
         method = &Benchmark::GetMergeOperands;
+      } else if (name == "gen_properties") {
+        method = &Benchmark::GenProperties;
+      } else if (name == "read_properties") {
+        method = &Benchmark::ReadProperties;
       } else if (!name.empty()) {  // No error message for empty name
         fprintf(stderr, "unknown benchmark '%s'\n", name.c_str());
         exit(1);
@@ -3420,6 +3462,8 @@ class Benchmark {
 
     assert(db_.db == nullptr);
 
+    options.table_properties_collector_factories.emplace_back(
+        std::make_shared<TestPropCollectorFactory>());
     options.env = FLAGS_env;
     options.max_open_files = FLAGS_open_files;
     if (FLAGS_cost_write_buffer_to_cache || FLAGS_db_write_buffer_size != 0) {
@@ -6301,6 +6345,37 @@ class Benchmark {
       std::cout << "List: " << to_print << " : " << *psl.GetSelf() << "\n";
       if (to_print++ > 2) break;
     }
+  }
+
+  void GenProperties(ThreadState*) {
+    DB* db = db_.db;
+    Random64 rnd(334);
+    for (int f = 0; f < 2048; f++) {
+      for (int k = 0; k < 512 * 1024; k++) {
+        uint64_t key = rnd.Next();
+        uint64_t value = rnd.Next();
+        db->Put(WriteOptions(), Slice(reinterpret_cast<const char*>(&key), 8),
+            Slice(reinterpret_cast<const char*>(&value), 8));
+      }
+      db->Flush(FlushOptions());
+    }
+  }
+
+  void ReadProperties(ThreadState*) {
+    DB* db = db_.db;
+    TablePropertiesCollection props;
+    Status s = db->GetPropertiesOfAllTables(&props);
+    uint64_t total_prop = 0;
+    uint64_t total_prop_size = 0;
+    for (auto& tp : props) {
+      auto& user_prop = tp.second->user_collected_properties;
+      auto it = user_prop.find("test_prop");
+      if (it != user_prop.end()) {
+        total_prop++;
+        total_prop_size += it->second.size();
+      }
+    }
+    printf("total prop %lu %lu\n", total_prop, total_prop_size);
   }
 
 #ifndef ROCKSDB_LITE
