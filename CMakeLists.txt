@@ -62,6 +62,34 @@ set(CLOUD_ENV_CC ${CMAKE_BINARY_DIR}/cloud_env.cc)
 add_library(cloud_build_version OBJECT ${CLOUD_ENV})
 target_include_directories(cloud_env PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cloud)
 
+if (WITH_CLOUD_TESTS AND (NOT CMAKE_BUILD_TYPE STREQUAL "Release"))
+  include(CTest)
+  include_directories(SYSTEM ${ROCKSDB_DIR}/third-party/gtest-1.7.0/fused-src)
+  set(TESTS
+        cloud_manifest_test
+        db_cloud_test
+        remote_compaction_test)
+  set(TEST_LIBS
+        cloud
+        rocksdb
+        testutillib
+        gtest)
+
+  foreach(test ${TESTS})
+    add_executable(cloud_${test} cloud/${test}.cc $<TARGET_OBJECTS:testharness>)
+      target_link_libraries(cloud_${test} ${TEST_LIBS})
+      add_test(cloud_${test} cloud_${test})
+  endforeach(test ${TESTS})
+endif()
+
+if (WITH_TITAN_TOOLS)
+  set(TOOLS_LIBS
+        titan
+        rocksdb)
+
+  target_link_libraries(titandb_bench ${TOOLS_LIBS})
+endif()
+
 include(GNUInstallDirs)
 install(DIRECTORY include/rocksdb/cloud
   COMPONENT devel
