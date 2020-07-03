@@ -30,7 +30,7 @@ endif()
 
 # Append rocksdb modules
 list(APPEND CMAKE_MODULE_PATH "${ROCKSDB_DIR}/cmake/modules/")
-include(cmake/rocksdb_flags.cmake)
+include(cmake/modules/rocksdb_flags.cmake)
 
 include_directories(${ROCKSDB_DIR})
 include_directories(${ROCKSDB_DIR}/include)
