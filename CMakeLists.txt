@@ -56,7 +56,7 @@ else()
 endif()
 string(REGEX REPLACE "[^0-9a-f]+" "" GIT_SHA "${GIT_SHA}")
 
-set(CLOUD_ENV_CC ${CMAKE_BINARY_DIR}/cloud_env.cc)
+set(CLOUD_ENV_CC ${CMAKE_BINARY_DIR}/cloud/cloud_env.cc)
 add_library(cloud_env OBJECT ${CLOUD_ENV_CC})
 target_include_directories(cloud_env PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cloud)
 
