@@ -57,7 +57,7 @@ endif()
 string(REGEX REPLACE "[^0-9a-f]+" "" GIT_SHA "${GIT_SHA}")
 
 set(CLOUD_ENV_CC ${CMAKE_BINARY_DIR}/cloud_env.cc)
-add_library(cloud_build_version OBJECT ${CLOUD_ENV_CC})
+add_library(cloud_env OBJECT ${CLOUD_ENV_CC})
 target_include_directories(cloud_env PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cloud)
 
 if (WITH_CLOUD_TESTS AND (NOT CMAKE_BUILD_TYPE STREQUAL "Release"))
@@ -78,14 +78,6 @@ if (WITH_CLOUD_TESTS AND (NOT CMAKE_BUILD_TYPE STREQUAL "Release"))
       target_link_libraries(cloud_${test} ${TEST_LIBS})
       add_test(cloud_${test} cloud_${test})
   endforeach(test ${TESTS})
-endif()
-
-if (WITH_CLOUD_TOOLS)
-  set(TOOLS_LIBS
-        cloud
-        rocksdb)
-
-  target_link_libraries(cloud_bench ${TOOLS_LIBS})
 endif()
 
 include(GNUInstallDirs)
