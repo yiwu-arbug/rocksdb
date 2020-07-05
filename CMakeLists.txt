@@ -34,9 +34,9 @@ include(cmake/modules/rocksdb_flags.cmake)
 
 include_directories(${ROCKSDB_DIR})
 include_directories(${ROCKSDB_DIR}/include)
-include_directories(${PROJECT_SOURCE_DIR}/include)
-include_directories(${PROJECT_SOURCE_DIR}/src)
-include_directories(${PROJECT_SOURCE_DIR}/util)
+include_directories(${PROJECT_SOURCE_DIR}/cloud)
+include_directories(${PROJECT_SOURCE_DIR}/cloud/aws)
+include_directories(${PROJECT_SOURCE_DIR}/include/rocksdb/cloud)
 
 file(GLOB SOURCES src/*.cc)
 
