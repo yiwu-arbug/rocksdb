@@ -34,9 +34,10 @@ include(cmake/modules/rocksdb_flags.cmake)
 
 include_directories(${ROCKSDB_DIR})
 include_directories(${ROCKSDB_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/cloud)
 include_directories(${PROJECT_SOURCE_DIR}/cloud/aws)
-include_directories(${PROJECT_SOURCE_DIR}/include/rocksdb/cloud)
+include_directories(${PROJECT_SOURCE_DIR}/include)
 
 file(GLOB SOURCES src/*.cc)
 
@@ -56,7 +57,7 @@ else()
 endif()
 string(REGEX REPLACE "[^0-9a-f]+" "" GIT_SHA "${GIT_SHA}")
 
-set(CLOUD_ENV_CC ${CMAKE_BINARY_DIR}/cloud/cloud_env.cc)
+set(CLOUD_ENV_CC ${PROJECT_SOURCE_DIR}/cloud/cloud_env.cc)
 add_library(cloud_env OBJECT ${CLOUD_ENV_CC})
 target_include_directories(cloud_env PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cloud)
 
