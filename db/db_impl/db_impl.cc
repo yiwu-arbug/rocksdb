@@ -3033,7 +3033,7 @@ Status DBImpl::DeleteFilesInRanges(ColumnFamilyHandle* column_family,
       }
     }
 
-    InstrumentedMutexLock l(&mutex_);
+    mutex_.LockWithoutFlagCheck();
     deleting_file_ = false;
     del_file_cv_.SignalAll();
 
@@ -3054,6 +3054,7 @@ Status DBImpl::DeleteFilesInRanges(ColumnFamilyHandle* column_family,
     }
     input_version->Unref();
     FindObsoleteFiles(&job_context, false);
+    mutex_.Unlock();
   }  // lock released here
 
   LogFlush(immutable_db_options_.info_log);
