@@ -154,6 +154,7 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       stats_(immutable_db_options_.statistics.get()),
       mutex_(stats_, env_, DB_MUTEX_WAIT_MICROS,
              immutable_db_options_.use_adaptive_mutex),
+
       default_cf_handle_(nullptr),
       max_total_in_memory_state_(0),
       env_options_(BuildDBOptions(immutable_db_options_, mutable_db_options_)),
@@ -164,6 +165,7 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       db_lock_(nullptr),
       shutting_down_(false),
       bg_cv_(&mutex_),
+      del_file_cv_(&mutex_),
       logfile_number_(0),
       log_dir_synced_(false),
       log_empty_(true),
@@ -228,6 +230,7 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       closed_(false),
       error_handler_(this, immutable_db_options_, &mutex_),
       atomic_flush_install_cv_(&mutex_) {
+  mutex_.SetFlag(&del_file_cv_, &deleting_file_);
   // !batch_per_trx_ implies seq_per_batch_ because it is only unset for
   // WriteUnprepared, which should use seq_per_batch_.
   assert(batch_per_txn_ || seq_per_batch_);
@@ -2977,9 +2980,11 @@ Status DBImpl::DeleteFilesInRanges(ColumnFamilyHandle* column_family,
   std::set<FileMetaData*> deleted_files;
   JobContext job_context(next_job_id_.fetch_add(1), true);
   {
-    InstrumentedMutexLock l(&mutex_);
+    {
+      InstrumentedMutexLock l(&mutex_);
+      deleting_file_ = true;
+    }
     Version* input_version = cfd->current();
-
     auto* vstorage = input_version->storage_info();
     for (size_t r = 0; r < n; r++) {
       auto begin = ranges[r].start, end = ranges[r].limit;
@@ -3027,6 +3032,11 @@ Status DBImpl::DeleteFilesInRanges(ColumnFamilyHandle* column_family,
         }
       }
     }
+
+    InstrumentedMutexLock l(&mutex_);
+    deleting_file_ = false;
+    del_file_cv_.SignalAll();
+
     if (edit.GetDeletedFiles().empty()) {
       job_context.Clean();
       return Status::OK();

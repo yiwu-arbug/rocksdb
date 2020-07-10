@@ -92,7 +92,7 @@ Status DBImpl::MultiBatchWriteImpl(const WriteOptions& write_options,
       write_thread_.WaitForMemTableWriters();
     }
     WriteThread::WriteGroup wal_write_group;
-    mutex_.Lock();
+    mutex_.LockWithoutFlagCheck();
     bool need_log_sync = !write_options.disableWAL && write_options.sync;
     bool need_log_dir_sync = need_log_sync && !log_dir_synced_;
     PERF_TIMER_STOP(write_pre_and_post_process_time);
@@ -1024,13 +1024,13 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
 
   assert(!single_column_family_mode_ ||
          versions_->GetColumnFamilySet()->NumberOfColumnFamilies() == 1);
-  if (UNLIKELY(status.ok() && !single_column_family_mode_ &&
+  if (!deleting_file_ && UNLIKELY(status.ok() && !single_column_family_mode_ &&
                total_log_size_ > GetMaxTotalWalSize())) {
     WaitForPendingWrites();
     status = SwitchWAL(write_context);
   }
 
-  if (UNLIKELY(status.ok() && write_buffer_manager_->ShouldFlush())) {
+  if (!deleting_file_ && UNLIKELY(status.ok() && write_buffer_manager_->ShouldFlush())) {
     // Before a new memtable is added in SwitchMemtable(),
     // write_buffer_manager_->ShouldFlush() will keep returning true. If another
     // thread is writing to another DB with the same write buffer, they may also
@@ -1040,7 +1040,7 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
     status = HandleWriteBufferFull(write_context);
   }
 
-  if (UNLIKELY(status.ok() && !flush_scheduler_.Empty())) {
+  if (!deleting_file_ && UNLIKELY(status.ok() && !flush_scheduler_.Empty())) {
     WaitForPendingWrites();
     status = ScheduleFlushes(write_context);
   }
