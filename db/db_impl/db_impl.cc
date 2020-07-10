@@ -3039,6 +3039,7 @@ Status DBImpl::DeleteFilesInRanges(ColumnFamilyHandle* column_family,
 
     if (edit.GetDeletedFiles().empty()) {
       job_context.Clean();
+      mutex_.Unlock();
       return Status::OK();
     }
     input_version->Ref();
