@@ -171,7 +171,7 @@ class Compaction {
 
   // Is this a trivial compaction that can be implemented by just
   // moving a single input file to the next level (no merging or splitting)
-  bool IsTrivialMove() const;
+  bool IsTrivialMove(InstrumentedMutex* mu = nullptr) const;
 
   // If true, then the compaction can be done by simply deleting input files.
   bool deletion_compaction() const { return deletion_compaction_; }
@@ -258,7 +258,8 @@ class Compaction {
   std::unique_ptr<CompactionFilter> CreateCompactionFilter() const;
 
   // Create a SstPartitioner from sst_partitioner_factory
-  std::unique_ptr<SstPartitioner> CreateSstPartitioner() const;
+  std::unique_ptr<SstPartitioner> CreateSstPartitioner(
+      InstrumentedMutex* mu = nullptr) const;
 
   // Is the input level corresponding to output_level_ empty?
   bool IsOutputLevelEmpty() const;

@@ -8,6 +8,8 @@
 
 #include <algorithm>
 
+#include "test_util/sync_point.h"
+
 namespace ROCKSDB_NAMESPACE {
 
 PartitionerResult SstPartitionerFixedPrefix::ShouldPartition(
@@ -33,6 +35,8 @@ bool SstPartitionerFixedPrefix::CanDoTrivialMove(
 std::unique_ptr<SstPartitioner>
 SstPartitionerFixedPrefixFactory::CreatePartitioner(
     const SstPartitioner::Context& /* context */) const {
+  TEST_SYNC_POINT("SstPartitionerFixedPrefix::CreatePartitioner:Begin1");
+  TEST_SYNC_POINT("SstPartitionerFixedPrefix::CreatePartitioner:Begin2");
   return std::unique_ptr<SstPartitioner>(new SstPartitionerFixedPrefix(len_));
 }
 

@@ -1087,6 +1087,44 @@ TEST_F(DBCompactionTest, CompactionSstPartitionerNonTrivial) {
   ASSERT_EQ("B", Get("bbbb1"));
 }
 
+// Make sure db_mutex is not held while creating sst partitioner.
+TEST_F(DBCompactionTest, CreateSstPartitionerNonBlocking) {
+  Options options = CurrentOptions();
+  options.compaction_style = kCompactionStyleLevel;
+  std::shared_ptr<SstPartitionerFactory> factory(
+      NewSstPartitionerFixedPrefixFactory(4));
+  options.sst_partitioner_factory = factory;
+
+  DestroyAndReopen(options);
+
+  ASSERT_OK(Put("aaaa1", "A"));
+  ASSERT_OK(Flush());
+  ASSERT_OK(Put("bbbb1", "B"));
+  ASSERT_OK(Flush());
+
+  ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->LoadDependency(
+      {{"SstPartitionerFixedPrefix::CreatePartitioner:Begin1",
+        "DBCompactionTest::CompactionSstPartitionerNonBlocking:BeforeWrite"},
+       {"DBCompactionTest::CompactionSstPartitionerNonBlocking:AfterWrite",
+        "SstPartitionerFixedPrefix::CreatePartitioner:Begin2"}});
+  ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->EnableProcessing();
+
+  auto compact_thread = port::Thread([&]() {
+    CompactRangeOptions compact_opts;
+    ASSERT_OK(dbfull()->CompactRange(compact_opts, nullptr, nullptr));
+  });
+
+  // Write a key, which will need to hold db_mutex.
+  TEST_SYNC_POINT(
+      "DBCompactionTest::CompactionSstPartitionerNonBlocking:BeforeWrite");
+  ASSERT_OK(Put("cccc1", "C"));
+  TEST_SYNC_POINT(
+      "DBCompactionTest::CompactionSstPartitionerNonBlocking:AfterWrite");
+  compact_thread.join();
+
+  ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->DisableProcessing();
+}
+
 TEST_F(DBCompactionTest, ZeroSeqIdCompaction) {
   Options options = CurrentOptions();
   options.compaction_style = kCompactionStyleLevel;

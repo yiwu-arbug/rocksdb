@@ -289,7 +289,7 @@ bool Compaction::InputCompressionMatchesOutput() const {
   return matches;
 }
 
-bool Compaction::IsTrivialMove() const {
+bool Compaction::IsTrivialMove(InstrumentedMutex* mu) const {
   // Avoid a move if there is lots of overlapping grandparent data.
   // Otherwise, the move could create a parent file that will require
   // a very expensive merge later on.
@@ -325,7 +325,7 @@ bool Compaction::IsTrivialMove() const {
 
   // assert inputs_.size() == 1
 
-  std::unique_ptr<SstPartitioner> partitioner = CreateSstPartitioner();
+  std::unique_ptr<SstPartitioner> partitioner = CreateSstPartitioner(mu);
 
   for (const auto& file : inputs_.front().files) {
     std::vector<FileMetaData*> file_grand_parents;
@@ -537,7 +537,8 @@ std::unique_ptr<CompactionFilter> Compaction::CreateCompactionFilter() const {
       context);
 }
 
-std::unique_ptr<SstPartitioner> Compaction::CreateSstPartitioner() const {
+std::unique_ptr<SstPartitioner> Compaction::CreateSstPartitioner(
+    InstrumentedMutex* mu) const {
   if (!immutable_cf_options_.sst_partitioner_factory) {
     return nullptr;
   }
@@ -548,8 +549,17 @@ std::unique_ptr<SstPartitioner> Compaction::CreateSstPartitioner() const {
   context.output_level = output_level_;
   context.smallest_user_key = smallest_user_key_;
   context.largest_user_key = largest_user_key_;
-  return immutable_cf_options_.sst_partitioner_factory->CreatePartitioner(
-      context);
+
+  if (mu != nullptr) {
+    mu->AssertHeld();
+    mu->Unlock();
+  }
+  std::unique_ptr<SstPartitioner> partitioner =
+      immutable_cf_options_.sst_partitioner_factory->CreatePartitioner(context);
+  if (mu != nullptr) {
+    mu->Lock();
+  }
+  return partitioner;
 }
 
 bool Compaction::IsOutputLevelEmpty() const {
