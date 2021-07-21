@@ -2106,6 +2106,7 @@ TEST_F(DBTest, PurgeInfoLogs) {
       options.db_log_dir = "";
     }
     for (int i = 0; i < 8; i++) {
+      printf("reopen %d\n", i);
       Reopen(options);
     }
 
