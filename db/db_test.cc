@@ -2100,6 +2100,7 @@ TEST_F(DBTest, PurgeInfoLogs) {
   options.create_if_missing = true;
   for (int mode = 0; mode <= 1; mode++) {
     if (mode == 1) {
+      printf("log dir %s\n", options.db_log_dir.c_str());
       options.db_log_dir = dbname_ + "_logs";
       env_->CreateDirIfMissing(options.db_log_dir);
     } else {
